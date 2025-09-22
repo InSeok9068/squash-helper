@@ -46,6 +46,7 @@ func main() {
 
 	go func() {
 		log.Println("listening:", url)
+		log.Println("Ctrl+C to exit")
 		openBrowser(url)
 		if err := http.Serve(ln, mux); err != nil {
 			log.Fatal(err)
