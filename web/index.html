@@ -1,29 +1,74 @@
-<!DOCTYPE html>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>스쿼시 신청 도우미</title>
-<link
-  rel="stylesheet"
-  href="https://cdn.jsdelivr.net/npm/beercss@3.5.9/dist/cdn/beer.min.css"
-/>
-<section class="max">
-  <h3>스쿼시 신청 도우미</h3>
-  <p>설치 없이 실행되는 초경량 도구입니다.</p>
-  <button class="button filled" onclick="action()">신청 시작</button>
-  <button class="button filled" onclick="launch()">크롬 디버깅 열기</button>
-</section>
-<script>
-  function action() {
-    fetch("/action")
-      .then((res) => res.text())
-      .then((text) => alert(text))
-      .catch((err) => alert(err));
-  }
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <meta name="google" content="notranslate" />
+    <title>스쿼시 강습 신청 도우미</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/beercss@3.12.8/dist/cdn/beer.min.css"
+      rel="stylesheet"
+    />
+    <script
+      type="module"
+      src="https://cdn.jsdelivr.net/npm/beercss@3.12.8/dist/cdn/beer.min.js"
+    ></script>
+    <script
+      type="module"
+      src="https://cdn.jsdelivr.net/npm/material-dynamic-colors@1.1.2/dist/cdn/material-dynamic-colors.min.js"
+    ></script>
+  </head>
+  <body>
+    <main class="responsive">
+      <nav>
+        <h4>스쿼시 수강 신청 도우미</h4>
+      </nav>
+      <div class="space"></div>
+      <hr />
+      <nav>
+        <p class="bold">1. 크롬 디버깅 열기</p>
+      </nav>
+      <nav>
+        <button class="button" onclick="launch()">크롬 디버깅 열기</button>
+      </nav>
+      <div class="space"></div>
+      <hr />
+      <nav>
+        <p class="bold">2. 페이지 진입</p>
+      </nav>
+      <nav>
+        <p>크롬(디버깅) 페이지에서 강습신청 페이지까지 진입</p>
+      </nav>
+      <nav>
+        <p>강습 신청 페이지가 꼭 브라우저의 첫번째 탭에 존재하여야함</p>
+      </nav>
+      <div class="space"></div>
+      <hr />
+      <nav>
+        <p class="bold">3. 강습 신청</p>
+      </nav>
+      <nav>
+        <button onclick="action('1')">강습 구분 선택 (스쿼시)</button>
+        <button onclick="action('2')">강습 일자 선택 (화목)</button>
+        <button onclick="action('3')">강습 시간 선택 (화목 8시)</button>
+        <!-- <button onclick="action('2')">강습 일자 선택 (월수금)</button> -->
+        <!-- <button onclick="action('4')">강습 시간 선택 (월수금 8시)</button> -->
+      </nav>
+    </main>
+    <script>
+      function action(code) {
+        fetch("/action?code=" + code)
+          .then((res) => res.text())
+          .then((text) => alert(text))
+          .catch((err) => alert(err));
+      }
 
-  function launch() {
-    fetch("/launch")
-      .then((res) => res.text())
-      .then((text) => alert(text))
-      .catch((err) => alert(err));
-  }
-</script>
+      function launch() {
+        fetch("/launch")
+          .then((res) => res.text())
+          .then((text) => alert(text))
+          .catch((err) => alert(err));
+      }
+    </script>
+  </body>
+</html>
