@@ -45,8 +45,14 @@ func main() {
 	url := "http://" + ln.Addr().String() + "/index.html"
 
 	go func() {
-		log.Println("listening:", url)
-		log.Println("Ctrl+C to exit")
+		log.Println("===========================================")
+		log.Println(" 🚀 서버가 성공적으로 시작되었습니다!")
+		log.Println(" 👉 브라우저에서 아래 주소로 접속하세요:")
+		log.Printf("     %s\n", url)
+		log.Println()
+		log.Println(" ⚠️  이 터미널 창을 닫으면 프로그램이 종료됩니다.")
+		log.Println("    종료하지 마시고, 사용을 마친 뒤에만 닫아주세요.")
+		log.Println("===========================================")
 		openBrowser(url)
 		if err := http.Serve(ln, mux); err != nil {
 			log.Fatal(err)
