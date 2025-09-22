@@ -26,15 +26,15 @@ func openBrowser(url string) {
 }
 
 func main() {
-	// 임베드 FS의 루트를 web/ 하위로 설정
+	// 임베드 FS의 루트를 / 하위로 설정
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/action", action.Action)
 	mux.HandleFunc("/launch", action.Launch)
+	mux.HandleFunc("/action", action.Action)
 
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
