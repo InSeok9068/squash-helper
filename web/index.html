@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>스쿼시 신청 도우미</title>
+<link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/beercss@3.5.9/dist/cdn/beer.min.css"
+/>
+<section class="max">
+  <h3>스쿼시 신청 도우미</h3>
+  <p>설치 없이 실행되는 초경량 도구입니다.</p>
+  <button class="button filled" onclick="action()">신청 시작</button>
+  <button class="button filled" onclick="launch()">크롬 디버깅 열기</button>
+</section>
+<script>
+  function action() {
+    fetch("/action")
+      .then((res) => res.text())
+      .then((text) => alert(text))
+      .catch((err) => alert(err));
+  }
+
+  function launch() {
+    fetch("/launch")
+      .then((res) => res.text())
+      .then((text) => alert(text))
+      .catch((err) => alert(err));
+  }
+</script>
