@@ -4,7 +4,6 @@
 package action
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,11 +33,8 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	// 이미 9222가 살아있으면 다시 켤 필요 없음
 	if debugPortAlive() {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"ok":   true,
-			"msg":  "이미 디버깅 포트(9222)가 열려 있습니다.",
-			"port": 9222,
-		})
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte("이미 디버깅 포트(9222)가 열려 있습니다."))
 		return
 	}
 
@@ -89,11 +85,8 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":   true,
-		"msg":  "Chrome 디버깅 포트로 실행 완료",
-		"port": 9222,
-	})
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Chrome 디버깅 포트로 실행 완료"))
 }
 
 func waitUntil(deadline time.Duration, step time.Duration, fn func() bool) bool {
