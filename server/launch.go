@@ -17,6 +17,7 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 	u := launcher.New().
 		Leakless(false).
 		Headless(false).
+		Set("window-size", "1280,800"). // 크롬 런치 인자
 		MustLaunch()
 
 	browser := rod.New().ControlURL(u).MustConnect()

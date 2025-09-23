@@ -206,6 +206,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 			// w.WriteHeader(http.StatusOK)
 			// w.Write([]byte("강습 구분 선택 완료"))
 			if forceSelect(page, "#areaGbn", "호계스쿼시") {
+				time.Sleep(1 * time.Second)
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 구분 선택 완료"))
 			} else {
@@ -222,6 +223,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 			// w.WriteHeader(http.StatusOK)
 			// w.Write([]byte("강습 과정 선택 완료"))
 			if forceSelect(page, "#entranceType", "화목(강습)") {
+				time.Sleep(1 * time.Second)
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 과정 선택 완료"))
 			} else {
@@ -250,6 +252,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 					btn.MustEval(`() => this.click()`)
 
 					clicked = true
+					time.Sleep(1 * time.Second)
 					w.WriteHeader(http.StatusOK)
 					w.Write([]byte("강습 시간 선택 완료"))
 					break // 하나만 클릭하고 종료
