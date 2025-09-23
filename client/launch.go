@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-package action
+package client
 
 import (
 	"fmt"

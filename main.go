@@ -2,17 +2,43 @@ package main
 
 import (
 	"embed"
+	"flag"
+	"fmt"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os/exec"
 	"runtime"
-	"squash-helper/action"
+	"squash-helper/client"
+	"squash-helper/server"
 )
 
-//go:embed web/*
-var webFS embed.FS
+//go:embed web_client/*
+var webClientFS embed.FS
+
+//go:embed web_server/*
+var webServerFS embed.FS
+
+func main() {
+	flag.Parse()
+	args := flag.Args()
+
+	fmt.Println(args)
+
+	// mod := "server"
+	mod := "client"
+
+	if len(args) > 0 {
+		mod = args[0]
+	}
+
+	if mod == "client" {
+		Client()
+	} else {
+		Server()
+	}
+}
 
 func openBrowser(url string) {
 	switch runtime.GOOS {
@@ -25,16 +51,16 @@ func openBrowser(url string) {
 	}
 }
 
-func main() {
+func Client() {
 	// 임베드 FS의 루트를 / 하위로 설정
-	sub, err := fs.Sub(webFS, "web")
+	sub, err := fs.Sub(webClientFS, "web_client")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/launch", action.Launch)
-	mux.HandleFunc("/action", action.Action)
+	mux.HandleFunc("/launch", client.Launch)
+	mux.HandleFunc("/action", client.Action)
 
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
@@ -60,4 +86,23 @@ func main() {
 	}()
 
 	select {} // Ctrl+C로 종료
+}
+
+func Server() {
+	// 임베드 FS의 루트를 / 하위로 설정
+	sub, err := fs.Sub(webServerFS, "web_server")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/launch", server.Launch)
+	mux.HandleFunc("/login", server.Login)
+	mux.Handle("/", http.FileServer(http.FS(sub)))
+
+	// 서버 실행
+	fmt.Println("서버 실행 중... http://localhost:8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		panic(err)
+	}
 }
