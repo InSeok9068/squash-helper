@@ -7,6 +7,7 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/go-rod/stealth"
 )
 
 func Launch(w http.ResponseWriter, r *http.Request) {
@@ -21,7 +22,8 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		MustLaunch()
 
 	browser := rod.New().ControlURL(u).MustConnect()
-	page := browser.MustPage("https://www.auc.or.kr/hogye/main/view")
+	page := stealth.MustPage(browser)
+	page.MustNavigate("https://www.auc.or.kr/hogye/main/view")
 
 	session := &userSession{browser: browser, page: page}
 	sessionID, err := registerSession(session)
