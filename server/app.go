@@ -1,48 +1,42 @@
 package server
 
 import (
+	"embed"
+	"fmt"
+	"io/fs"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
 )
+
+//go:embed web/*
+var webServerFS embed.FS
 
 var browser *rod.Browser
 var page *rod.Page
 
-func Launch(w http.ResponseWriter, r *http.Request) {
-	u := launcher.New().
-		Leakless(false).
-		Headless(false).
-		MustLaunch()
+func Run() {
+	// 임베드 FS의 루트를 / 하위로 설정
+	sub, err := fs.Sub(webServerFS, "web")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	browser = rod.New().ControlURL(u).MustConnect()
-	// 호계 복합청사 페이지 진입
-	page = browser.MustPage("https://www.auc.or.kr/hogye/main/view")
-	// 3초 대기
-	time.Sleep(3 * time.Second)
-	// 로그인 페이지 진입
-	page.MustNavigate("https://www.auc.or.kr/sign/in/base/user")
-	go func() {
-		// 첫 번째 confirm → 취소
-		w1, h1 := page.HandleDialog()
-		w1()
-		_ = h1(&proto.PageHandleJavaScriptDialog{Accept: false})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/launch", Launch)
+	mux.HandleFunc("/login", Login)
+	mux.HandleFunc("/move", Move)
+	mux.HandleFunc("/action", Action)
+	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-		// 두 번째 confirm → 확인
-		w2, h2 := page.HandleDialog()
-		w2()
-		_ = h2(&proto.PageHandleJavaScriptDialog{Accept: true})
-	}()
-	// 3초 대기
-	time.Sleep(2 * time.Second)
-	page.MustElement(".total-loginN__btn").MustClick()
-	time.Sleep(1 * time.Second)
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("로그인 페이지 진입 완료"))
+	// 서버 실행
+	fmt.Println("서버 실행 중... http://localhost:8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		panic(err)
+	}
 }
 
 func Login(w http.ResponseWriter, r *http.Request) {
