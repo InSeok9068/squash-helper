@@ -37,6 +37,9 @@
         </fieldset>
       </nav>
       <nav>
+        <button onclick="move()">강습 신청 페이지 진입</button>
+      </nav>
+      <nav>
         <button onclick="action('1')">1. 강습 구분 선택 (스쿼시)</button>
         <button onclick="action('2')">2. 강습 일자 선택 (화목)</button>
         <button onclick="action('3')">3. 강습 시간 선택 (화목 8시)</button>
@@ -57,6 +60,13 @@
             "&password=" +
             document.getElementById("password").value
         )
+          .then((res) => res.text())
+          .then((text) => alert(text))
+          .catch((err) => alert(err));
+      }
+
+      function move() {
+        fetch("/move")
           .then((res) => res.text())
           .then((text) => alert(text))
           .catch((err) => alert(err));

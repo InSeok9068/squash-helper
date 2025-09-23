@@ -98,6 +98,8 @@ func Server() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/launch", server.Launch)
 	mux.HandleFunc("/login", server.Login)
+	mux.HandleFunc("/move", server.Move)
+	mux.HandleFunc("/action", server.Action)
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
 	// 서버 실행
