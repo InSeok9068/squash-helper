@@ -1,12 +1,15 @@
 package server
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -15,8 +18,18 @@ import (
 //go:embed web/*
 var webServerFS embed.FS
 
-var browser *rod.Browser
-var page *rod.Page
+type userSession struct {
+	browser *rod.Browser
+	page    *rod.Page
+	mu      sync.Mutex
+}
+
+const sessionCookieName = "squash-helper-session"
+
+var (
+	sessionMu sync.RWMutex
+	sessions  = make(map[string]*userSession)
+)
 
 func Run() {
 	// 임베드 FS의 루트를 / 하위로 설정
@@ -39,7 +52,94 @@ func Run() {
 	}
 }
 
+func generateSessionID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func registerSession(session *userSession) (string, error) {
+	id, err := generateSessionID()
+	if err != nil {
+		return "", err
+	}
+	sessionMu.Lock()
+	sessions[id] = session
+	sessionMu.Unlock()
+	return id, nil
+}
+
+func cleanupSession(sessionID string) {
+	sessionMu.Lock()
+	session, ok := sessions[sessionID]
+	if ok {
+		delete(sessions, sessionID)
+	}
+	sessionMu.Unlock()
+
+	if !ok || session == nil {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if session.browser != nil {
+		if err := session.browser.Close(); err != nil {
+			log.Printf("세션 %s 브라우저 종료 실패: %v", sessionID, err)
+		}
+	}
+}
+
+func setSessionCookie(w http.ResponseWriter, sessionID string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sessionID,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func getSessionFromRequest(r *http.Request) (string, *userSession, bool) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil {
+		return "", nil, false
+	}
+
+	sessionMu.RLock()
+	session, ok := sessions[cookie.Value]
+	sessionMu.RUnlock()
+
+	if !ok || session == nil {
+		return cookie.Value, nil, false
+	}
+
+	return cookie.Value, session, true
+}
+
+func requireSession(w http.ResponseWriter, r *http.Request) (*userSession, string, bool) {
+	sessionID, session, ok := getSessionFromRequest(r)
+	if !ok {
+		http.Error(w, "활성화된 브라우저 세션이 없습니다. 먼저 브라우저 실행을 진행해주세요.", http.StatusBadRequest)
+		return nil, "", false
+	}
+	return session, sessionID, true
+}
+
 func Login(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	page := session.page
+
 	id := r.URL.Query().Get("id")
 	password := r.URL.Query().Get("password")
 
@@ -67,13 +167,31 @@ func Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func Move(w http.ResponseWriter, r *http.Request) {
-	page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
+	session, _, ok := requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	session.page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
 	time.Sleep(1 * time.Second)
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("강습 신청 페이지 진입 완료"))
 }
 
 func Action(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	page := session.page
+
 	code := r.URL.Query().Get("code")
 	switch code {
 	case "1":
