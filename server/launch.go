@@ -70,3 +70,11 @@ func handleLoginDialogs(page *rod.Page) {
 	w2()
 	_ = h2(&proto.PageHandleJavaScriptDialog{Accept: true})
 }
+
+func Close(w http.ResponseWriter, r *http.Request) {
+	if sessionID, _, ok := getSessionFromRequest(r); ok {
+		cleanupSession(sessionID)
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("브라우저 종료 완료"))
+}

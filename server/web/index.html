@@ -56,6 +56,7 @@
       </nav>
       <nav>
         <button onclick="browserLaunch()">브라우저 실행</button>
+        <button onclick="browserClose()">브라우저 종료</button>
       </nav>
       <nav>
         <fieldset>
@@ -168,6 +169,13 @@
           .then(handleResponse)
           .catch((err) => alert(err))
           .finally(() => refreshScreenshot(true));
+      }
+
+      function browserClose() {
+        showOverlay();
+        fetch("/close")
+          .then(handleResponse)
+          .catch((err) => alert(err));
       }
 
       function login() {

@@ -46,6 +46,7 @@ func Run() {
 	mux.HandleFunc("/move", Move)
 	mux.HandleFunc("/action", Action)
 	mux.HandleFunc("/screenshot", Screenshot)
+	mux.HandleFunc("/close", Close)
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
 	// 서버 실행
