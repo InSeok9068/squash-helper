@@ -3,7 +3,9 @@ package server
 import (
 	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
@@ -43,6 +45,7 @@ func Run() {
 	mux.HandleFunc("/login", Login)
 	mux.HandleFunc("/move", Move)
 	mux.HandleFunc("/action", Action)
+	mux.HandleFunc("/screenshot", Screenshot)
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
 	// 서버 실행
@@ -258,6 +261,41 @@ func Action(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte("조건에 맞는 강습 시간 버튼을 찾지 못했습니다."))
 			}
 		}
+	}
+}
+
+func Screenshot(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	if session.page == nil {
+		http.Error(w, "활성화된 페이지가 없습니다.", http.StatusBadRequest)
+		return
+	}
+
+	data, err := session.page.Screenshot(true, nil)
+	if err != nil {
+		log.Printf("세션 화면 캡처 실패: %v", err)
+		http.Error(w, "화면 캡처에 실패했습니다. 잠시 후 다시 시도해주세요.", http.StatusInternalServerError)
+		return
+	}
+
+	resp := struct {
+		Image      string    `json:"image"`
+		CapturedAt time.Time `json:"capturedAt"`
+	}{
+		Image:      "data:image/png;base64," + base64.StdEncoding.EncodeToString(data),
+		CapturedAt: time.Now(),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("스크린샷 응답 인코딩 실패: %v", err)
 	}
 }
 

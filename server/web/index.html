@@ -44,13 +44,79 @@
         <button onclick="action('2')">2. 강습 일자 선택 (화목)</button>
         <button onclick="action('3')">3. 강습 시간 선택 (화목 8시)</button>
       </nav>
+      <div class="space"></div>
+      <hr />
+      <nav>
+        <p class="bold">화면 캡처</p>
+      </nav>
+      <nav>
+        <button onclick="refreshScreenshot(true)">최신 화면 불러오기</button>
+      </nav>
+      <nav>
+        <p id="screenshot-time" class="muted"></p>
+      </nav>
+      <nav>
+        <img
+          id="screenshot"
+          alt="현재 브라우저 화면"
+          style="max-width: 100%; border: 1px solid #ccc; border-radius: 8px"
+        />
+      </nav>
     </main>
     <script>
+      function handleResponse(res) {
+        return res.text().then((text) => {
+          alert(text);
+          return res.ok;
+        });
+      }
+
+      function updateScreenshotInfo(message) {
+        const timeEl = document.getElementById("screenshot-time");
+        if (timeEl) {
+          timeEl.textContent = message || "";
+        }
+      }
+
+      function refreshScreenshot(showError) {
+        const img = document.getElementById("screenshot");
+        if (!img) {
+          return;
+        }
+        fetch("/screenshot")
+          .then((res) => {
+            if (!res.ok) {
+              return res.text().then((text) => {
+                throw new Error(text || "화면 캡처에 실패했습니다.");
+              });
+            }
+            return res.json();
+          })
+          .then((data) => {
+            img.src = data.image;
+            if (data.capturedAt) {
+              const captured = new Date(data.capturedAt);
+              updateScreenshotInfo(
+                "촬영 시각: " + captured.toLocaleString("ko-KR")
+              );
+            } else {
+              updateScreenshotInfo("최신 화면을 불러왔습니다.");
+            }
+          })
+          .catch((err) => {
+            img.removeAttribute("src");
+            updateScreenshotInfo("화면 캡처를 불러오지 못했습니다.");
+            if (showError) {
+              alert(err.message || err);
+            }
+          });
+      }
+
       function browserLaunch() {
         fetch("/launch")
-          .then((res) => res.text())
-          .then((text) => alert(text))
-          .catch((err) => alert(err));
+          .then(handleResponse)
+          .catch((err) => alert(err))
+          .finally(() => refreshScreenshot(true));
       }
 
       function login() {
@@ -60,24 +126,26 @@
             "&password=" +
             document.getElementById("password").value
         )
-          .then((res) => res.text())
-          .then((text) => alert(text))
-          .catch((err) => alert(err));
+          .then(handleResponse)
+          .catch((err) => alert(err))
+          .finally(() => refreshScreenshot(false));
       }
 
       function move() {
         fetch("/move")
-          .then((res) => res.text())
-          .then((text) => alert(text))
-          .catch((err) => alert(err));
+          .then(handleResponse)
+          .catch((err) => alert(err))
+          .finally(() => refreshScreenshot(false));
       }
 
       function action(code) {
         fetch("/action?code=" + code)
-          .then((res) => res.text())
-          .then((text) => alert(text))
-          .catch((err) => alert(err));
+          .then(handleResponse)
+          .catch((err) => alert(err))
+          .finally(() => refreshScreenshot(false));
       }
+
+      refreshScreenshot(false);
     </script>
   </body>
 </html>
