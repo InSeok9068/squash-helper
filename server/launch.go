@@ -17,11 +17,21 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	u := launcher.New().
 		Leakless(false).
+		NoSandbox(true).
 		HeadlessNew(true).
-		Append("--disable-gpu").                 // GPU 경로 제거
-		Append("--disable-software-rasterizer"). // 소프트웨어 GL까지 차단 → CPU 낭비↓
-		Append("--no-sandbox").
-		Set("window-size", "1280,800"). // 크롬 런치 인자
+		// GPU 경로 제거
+		Append("--disable-gpu").
+		// 소프트웨어 GL까지 차단 → CPU 낭비↓
+		Append("--disable-software-rasterizer").
+		// 첫 실행 체크 제거
+		Append("--no-first-run").
+		Append("--no-default-browser-check").
+		// 대기열 유지에 중요 (타이머/렌더러 절전 방지)
+		Append("--disable-background-timer-throttling").
+		Append("--disable-renderer-backgrounding").
+		Append("--disable-backgrounding-occluded-windows").
+		// 창 사이즈 설정
+		Set("window-size", "1280,800").
 		MustLaunch()
 
 	browser := rod.New().ControlURL(u).MustConnect()
