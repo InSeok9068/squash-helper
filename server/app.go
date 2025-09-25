@@ -165,7 +165,8 @@ func Login(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	time.Sleep(1 * time.Second)
+	// 페이지 진입 대기
+	page.MustWaitLoad()
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("로그인 완료"))
 }
@@ -179,8 +180,10 @@ func Move(w http.ResponseWriter, r *http.Request) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
-	session.page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
-	time.Sleep(1 * time.Second)
+	page := session.page
+	page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
+	// 페이지 진입 대기
+	page.MustWaitLoad()
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("강습 신청 페이지 진입 완료"))
 }
@@ -207,7 +210,8 @@ func Action(w http.ResponseWriter, r *http.Request) {
 			// w.WriteHeader(http.StatusOK)
 			// w.Write([]byte("강습 구분 선택 완료"))
 			if forceSelect(page, "#areaGbn", "호계스쿼시") {
-				time.Sleep(1 * time.Second)
+				// 페이지 진입 대기
+				page.MustWaitLoad()
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 구분 선택 완료"))
 			} else {
@@ -224,7 +228,8 @@ func Action(w http.ResponseWriter, r *http.Request) {
 			// w.WriteHeader(http.StatusOK)
 			// w.Write([]byte("강습 과정 선택 완료"))
 			if forceSelect(page, "#entranceType", "화목(강습)") {
-				time.Sleep(1 * time.Second)
+				// 페이지 진입 대기
+				page.MustWaitLoad()
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 과정 선택 완료"))
 			} else {
@@ -253,7 +258,8 @@ func Action(w http.ResponseWriter, r *http.Request) {
 					btn.MustEval(`() => this.click()`)
 
 					clicked = true
-					time.Sleep(1 * time.Second)
+					// 페이지 진입 대기
+					page.MustWaitLoad()
 					w.WriteHeader(http.StatusOK)
 					w.Write([]byte("강습 시간 선택 완료"))
 					break // 하나만 클릭하고 종료

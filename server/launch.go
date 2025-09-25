@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
@@ -51,22 +50,22 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
-	// 호계 복합청사 페이지 진입 후 대기
-	time.Sleep(2 * time.Second)
+	// 페이지 진입 대기
+	page.MustWaitLoad()
 
 	// 로그인 페이지 진입
 	page.MustNavigate("https://www.auc.or.kr/sign/in/base/user")
 
 	go handleLoginDialogs(page)
 
-	// 2초 대기
-	time.Sleep(2 * time.Second)
+	// 페이지 진입 대기
+	page.MustWaitLoad()
 
 	// 통합 로그인 클릭
 	page.MustElement(".total-loginN__btn").MustClick()
 
-	// 1초 대기
-	time.Sleep(1 * time.Second)
+	// 페이지 진입 대기
+	page.MustWaitLoad()
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("로그인 페이지 진입 완료"))
