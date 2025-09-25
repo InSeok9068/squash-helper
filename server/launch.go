@@ -17,7 +17,9 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	u := launcher.New().
 		Leakless(false).
-		Headless(false).
+		Headless(true).
+		Append("--no-sandbox").
+		Append("--disable-gpu").
 		Set("window-size", "1280,800"). // 크롬 런치 인자
 		MustLaunch()
 
