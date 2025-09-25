@@ -17,7 +17,7 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	u := launcher.New().
 		Leakless(false).
-		Headless(true).Append("--headless=new"). // 최신 헤드리스: 렌더 호환성↑, 오버헤드↓
+		HeadlessNew(true).
 		Append("--disable-gpu").                 // GPU 경로 제거
 		Append("--disable-software-rasterizer"). // 소프트웨어 GL까지 차단 → CPU 낭비↓
 		Append("--no-sandbox").
