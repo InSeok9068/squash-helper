@@ -22,18 +22,11 @@ FROM ubuntu:24.04 AS runtime
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Headless Chromium/rod 실행에 필요한 런타임 의존성
-RUN set -eux; \
-  apt-get update -o Acquire::Retries=3; \
-  apt-get install -y --no-install-recommends \
-    ca-certificates curl unzip tzdata \
-    libglib2.0-0t64 libgtk-3-0t64 libpango-1.0-0t64 \
-    libnss3 libnspr4 \
-    libx11-6 libxext6 libxcomposite1 libxdamage1 libxrandr2 libxkbcommon0 \
-    libdrm2 libgbm1 libxshmfence1 libcups2 \
-    libatk-bridge2.0-0 libatspi2.0-0 libpangocairo-1.0-0 \
-    libasound2t64 \
-    fonts-liberation \
-  ; rm -rf /var/lib/apt/lists/*
+RUN apt-get update -o Acquire::Retries=3 && apt-get install -y --no-install-recommends \
+      ca-certificates curl unzip tzdata \
+      libglib2.0-0t64 libnss3 libx11-6 libxkbcommon0 libgbm1 \
+      fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
 
 # (옵션) 한글 폰트가 필요하면 주석 해제
 # RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk && rm -rf /var/lib/apt/lists/*
