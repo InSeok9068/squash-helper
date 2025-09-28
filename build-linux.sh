@@ -5,7 +5,7 @@
 
 # Linux 환경 변수 설정
 export GOOS=linux
-export GOARCH=amd64
+export GOARCH=arm64
 # export CGO_ENABLED=1
 
 # 빌드 실행
