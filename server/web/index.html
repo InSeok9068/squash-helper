@@ -83,17 +83,21 @@
         <fieldset>
           <legend>강습 신청</legend>
           <div class="grid">
-            <button class="s12 m3" onclick="move()">
-              1. 강습 신청 페이지 진입
+            <button class="s12 m2" onclick="move()">1. 신청 페이지 진입</button>
+            <button class="s12 m2" onclick="action('1')">
+              2. 구분 선택 (스쿼시)
             </button>
-            <button class="s12 m3" onclick="action('1')">
-              2. 강습 구분 선택 (스쿼시)
+            <button class="s12 m2" onclick="action('2')">
+              3. 일자 선택 (화목)
             </button>
-            <button class="s12 m3" onclick="action('2')">
-              3. 강습 일자 선택 (화목)
+            <button class="s12 m2" onclick="action('3')">
+              4. 시간 선택 (화목 8시)
             </button>
-            <button class="s12 m3" onclick="action('3')">
-              4. 강습 시간 선택 (화목 8시)
+            <button
+              class="s12 m4 border small-round bold red-text"
+              onclick="action('4')"
+            >
+              [❗경고] 원클릭 신청 (실험중)
             </button>
           </div>
         </fieldset>
@@ -228,6 +232,11 @@
       }
 
       function action(code) {
+        if (code === "4") {
+          if (!confirm("[❗경고] 원클릭 신청 (실험중)\n진행하시겠습니까?")) {
+            return;
+          }
+        }
         showOverlay();
         fetch("/action?code=" + code)
           .then(handleResponse)

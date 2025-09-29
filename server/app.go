@@ -239,6 +239,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 	// 페이지 진입 대기
 	page.MustWaitLoad()
+	time.Sleep(1 * time.Second)
 
 	url := page.MustInfo().URL
 	if strings.HasPrefix(url, "https://newsso.anyang.go.kr/") {
@@ -294,8 +295,8 @@ func Action(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 구분 선택 완료"))
 			} else {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("강습 구분 선택 실패"))
+				http.Error(w, "강습 구분 선택 실패", http.StatusNotFound)
+				return
 			}
 		}
 	case "2":
@@ -312,8 +313,8 @@ func Action(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 과정 선택 완료"))
 			} else {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("강습 과정 선택 실패"))
+				http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
+				return
 			}
 		}
 	case "3":
@@ -346,8 +347,64 @@ func Action(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if !clicked {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("조건에 맞는 강습 시간 버튼을 찾지 못했습니다."))
+				http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
+				return
+			}
+		}
+	case "4":
+		{
+			page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
+			// 페이지 진입 대기
+			page.MustWaitLoad()
+			time.Sleep(500 * time.Millisecond)
+
+			if forceSelect(page, "#areaGbn", "호계스쿼시") {
+				// 페이지 진입 대기
+				page.MustWaitLoad()
+				time.Sleep(500 * time.Millisecond)
+			} else {
+				http.Error(w, "강습 구분 선택 실패", http.StatusNotFound)
+				return
+			}
+
+			if forceSelect(page, "#entranceType", "화목(강습)") {
+				// 페이지 진입 대기
+				page.MustWaitLoad()
+				time.Sleep(500 * time.Millisecond)
+			} else {
+				http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
+				return
+			}
+
+			btns := page.MustElements("a.common_btn.regist")
+			clicked := false
+			for _, btn := range btns {
+				html := btn.MustProperty("outerHTML").String()
+
+				// if strings.Contains(html, "주2일(화,목)") &&
+				// 	strings.Contains(html, "11:00 - 12:30") &&
+				// 	strings.Contains(html, "신청") {
+				if strings.Contains(html, "화목(강습)") &&
+					strings.Contains(html, "20:00 - 21:00") &&
+					strings.Contains(html, "신청") {
+
+					// [구버전]
+					// btn.MustClick()
+
+					btn.MustEval(`() => this.click()`)
+
+					clicked = true
+					// 페이지 진입 대기
+					page.MustWaitLoad()
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("강습 시간 선택 완료"))
+					break // 하나만 클릭하고 종료
+				}
+			}
+
+			if !clicked {
+				http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
+				return
 			}
 		}
 	}
