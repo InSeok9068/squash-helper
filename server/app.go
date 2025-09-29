@@ -239,6 +239,13 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 	// 페이지 진입 대기
 	page.MustWaitLoad()
+
+	url := page.MustInfo().URL
+	if strings.HasPrefix(url, "https://newsso.anyang.go.kr/") {
+		http.Error(w, "로그인 실패하였습니다. 아이디와 비밀번호를 확인해주세요.", http.StatusForbidden)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("로그인 완료"))
 }
