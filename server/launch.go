@@ -90,3 +90,20 @@ func Close(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("브라우저 종료 완료"))
 }
+
+func Refresh(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	page := session.page
+	page.MustReload()
+	// 페이지 진입 대기
+	page.MustWaitLoad()
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("브라우저 새로고침 완료"))
+}

@@ -44,7 +44,7 @@
       }
     </style>
   </head>
-  <body>
+  <body style="zoom: 0.9">
     <main class="responsive" style="overflow: auto">
       <nav>
         <h4>스쿼시 수강 신청 도우미</h4>
@@ -55,41 +55,48 @@
         <p class="bold">강습 신청</p>
       </nav>
       <nav>
-        <button onclick="browserLaunch()">브라우저 실행</button>
-        <button onclick="browserClose()">브라우저 종료</button>
+        <fieldset>
+          <legend>브라우저</legend>
+          <button onclick="browserLaunch()">실행</button>
+          <button onclick="browserRefresh()">새로고침</button>
+          <button class="border red-text bold" onclick="browserClose()">
+            ❗종료
+          </button>
+        </fieldset>
       </nav>
       <nav>
         <fieldset>
           <legend>로그인</legend>
           <div class="field border label">
             <input id="id" type="text" />
-            <label>아이디</label>
+            <span>아이디</span>
           </div>
           <div class="field border label">
             <input id="password" type="password" />
-            <label>비밀번호</label>
+            <span>비밀번호</span>
           </div>
           <button onclick="login()">로그인</button>
         </fieldset>
       </nav>
       <nav>
-        <button onclick="move()">강습 신청 페이지 진입</button>
+        <fieldset>
+          <legend>강습 신청</legend>
+          <div class="grid">
+            <button class="s12 m3" onclick="move()">
+              1. 강습 신청 페이지 진입
+            </button>
+            <button class="s12 m3" onclick="action('1')">
+              2. 강습 구분 선택 (스쿼시)
+            </button>
+            <button class="s12 m3" onclick="action('2')">
+              3. 강습 일자 선택 (화목)
+            </button>
+            <button class="s12 m3" onclick="action('3')">
+              4. 강습 시간 선택 (화목 8시)
+            </button>
+          </div>
+        </fieldset>
       </nav>
-      <nav>
-        <div class="grid">
-          <button class="s12 m1" onclick="action('1')">
-            1. 강습 구분 선택 (스쿼시)
-          </button>
-          <button class="s12 m1" onclick="action('2')">
-            2. 강습 일자 선택 (화목)
-          </button>
-          <button class="s12 m1" onclick="action('3')">
-            3. 강습 시간 선택 (화목 8시)
-          </button>
-        </div>
-      </nav>
-      <div class="space"></div>
-      <hr />
       <nav>
         <p class="bold">화면 캡처</p>
       </nav>
@@ -184,6 +191,14 @@
         fetch("/close")
           .then(handleResponse)
           .catch((err) => alert(err));
+      }
+
+      function browserRefresh() {
+        showOverlay();
+        fetch("/refresh")
+          .then(handleResponse)
+          .catch((err) => alert(err))
+          .finally(() => refreshScreenshot(false));
       }
 
       function login() {
