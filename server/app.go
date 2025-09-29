@@ -21,12 +21,17 @@ import (
 var webServerFS embed.FS
 
 type userSession struct {
-	browser *rod.Browser
-	page    *rod.Page
-	mu      sync.Mutex
+	browser    *rod.Browser
+	page       *rod.Page
+	mu         sync.Mutex
+	createdAt  time.Time
+	lastActive time.Time
 }
 
-const sessionCookieName = "squash-helper-session"
+const (
+	sessionCookieName = "squash-helper-session"
+	sessionTTL        = time.Hour
+)
 
 var (
 	sessionMu sync.RWMutex
@@ -50,6 +55,8 @@ func Run() {
 	mux.HandleFunc("/close", Close)
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
+	go startSessionReaper()
+
 	// 서버 실행
 	fmt.Println("서버 실행 중... http://localhost:8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
@@ -69,6 +76,15 @@ func registerSession(session *userSession) (string, error) {
 	id, err := generateSessionID()
 	if err != nil {
 		return "", err
+	}
+	now := time.Now()
+	if session != nil {
+		if session.createdAt.IsZero() {
+			session.createdAt = now
+		}
+		session.mu.Lock()
+		session.lastActive = now
+		session.mu.Unlock()
 	}
 	sessionMu.Lock()
 	sessions[id] = session
@@ -114,9 +130,15 @@ func getSessionFromRequest(r *http.Request) (string, *userSession, bool) {
 		return "", nil, false
 	}
 
-	sessionMu.RLock()
+	sessionMu.Lock()
 	session, ok := sessions[cookie.Value]
-	sessionMu.RUnlock()
+	sessionMu.Unlock()
+
+	if ok && session != nil {
+		session.mu.Lock()
+		session.lastActive = time.Now()
+		session.mu.Unlock()
+	}
 
 	if !ok || session == nil {
 		return cookie.Value, nil, false
@@ -134,9 +156,61 @@ func requireSession(w http.ResponseWriter, r *http.Request) (*userSession, strin
 	return session, sessionID, true
 }
 
+func startSessionReaper() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for now := range ticker.C {
+		var expired []string
+
+		sessionMu.RLock()
+		for id, session := range sessions {
+			if session == nil {
+				expired = append(expired, id)
+				continue
+			}
+
+			session.mu.Lock()
+			lastActive := session.lastActive
+			session.mu.Unlock()
+
+			if now.Sub(lastActive) > sessionTTL {
+				expired = append(expired, id)
+			}
+		}
+		sessionMu.RUnlock()
+
+		for _, id := range expired {
+			log.Printf("세션 %s이(가) 비활성 상태로 만료되어 종료합니다.", id)
+			cleanupSession(id)
+		}
+	}
+}
+
 func Login(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST 메서드만 허용됩니다.", http.StatusMethodNotAllowed)
+		return
+	}
+
 	session, _, ok := requireSession(w, r)
 	if !ok {
+		return
+	}
+
+	defer r.Body.Close()
+	var payload struct {
+		ID       string `json:"id"`
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "요청 본문 파싱에 실패했습니다.", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(payload.ID) == "" || strings.TrimSpace(payload.Password) == "" {
+		http.Error(w, "아이디와 비밀번호를 모두 입력해주세요.", http.StatusBadRequest)
 		return
 	}
 
@@ -145,17 +219,14 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	page := session.page
 
-	id := r.URL.Query().Get("id")
-	password := r.URL.Query().Get("password")
-
 	// 아이디 입력
 	login_id := page.MustElement("#login_id")
-	login_id.MustInput(id)
+	login_id.MustInput(payload.ID)
 	time.Sleep(1 * time.Second)
 
 	// 비밀번호 입력
 	login_password := page.MustElement("#login_pwd")
-	login_password.MustInput(password)
+	login_password.MustInput(payload.Password)
 	time.Sleep(1 * time.Second)
 
 	// 로그인 버튼 클릭
