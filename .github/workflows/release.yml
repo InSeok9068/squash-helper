@@ -49,6 +49,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 🔽 BuildKit 캐시 (레이어/마운트 포함) 실행 간 재사용
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Restart Server
         uses: appleboy/ssh-action@master
