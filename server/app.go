@@ -239,7 +239,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 	// 페이지 진입 대기
 	page.MustWaitLoad()
-	time.Sleep(1 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	url := page.MustInfo().URL
 	if strings.HasPrefix(url, "https://newsso.anyang.go.kr/") {
