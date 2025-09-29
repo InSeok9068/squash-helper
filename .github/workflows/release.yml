@@ -49,3 +49,54 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Restart Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.REMOTE_IP }}
+          username: ${{ secrets.REMOTE_ID }}
+          key: ${{ secrets.REMOTE_SSH_KEY }}
+          port: 22
+          script: |
+            cd ./Docker-Compose
+            docker compose pull squash-helper
+            docker compose up -d squash-helper
+
+      # 커밋 메시지 준비 (텔레그램 메시지 길이 제한 해결)
+      - name: Prepare Commit Message
+        id: prep_commit
+        run: echo "commit_message=$(echo "${{ github.event.head_commit.message }}" | head -n 1 | cut -c -200)" >> $GITHUB_OUTPUT
+
+      # 빌드 성공 메세지 발송
+      - name: Send Build Success Message
+        uses: appleboy/telegram-action@master
+        if: success()
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          format: markdown
+          message: |
+            Status: 😚 **Success**
+
+            Branch: ${{ github.ref_name }}
+
+            Commit message: ${{ steps.prep_commit.outputs.commit_message }}
+
+            [See changes](https://github.com/${{ github.repository }}/commit/${{github.sha}})
+
+      # 빌드 실패 메세지 발송
+      - name: Send Build Failure Message
+        uses: appleboy/telegram-action@master
+        if: failure()
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          format: markdown
+          message: |
+            Status: 😱 **Failure**
+
+            Branch: ${{ github.ref_name }}
+
+            Commit message: ${{ steps.prep_commit.outputs.commit_message }}
+
+            [link](https://github.com/${{ github.repository }}/actions)
