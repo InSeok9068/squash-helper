@@ -37,7 +37,12 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 	page := stealth.MustPage(browser)
 	page.MustNavigate("https://www.auc.or.kr/hogye/main/view")
 
-	session := &userSession{browser: browser, page: page}
+	session := &userSession{
+		browser:           browser,
+		page:              page,
+		statusSubscribers: make(map[uint64]chan statusEvent),
+	}
+	session.pushInfo("브라우저 세션을 준비합니다.")
 	sessionID, err := registerSession(session)
 	if err != nil {
 		_ = browser.Close()
@@ -47,27 +52,44 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	setSessionCookie(w, sessionID)
 
+	if f, ok := w.(http.Flusher); ok {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		f.Flush()
+	}
+
 	session.mu.Lock()
+
 	defer session.mu.Unlock()
 
-	// 페이지 진입 대기
+	session.pushInfo("안양호계센터 메인 페이지 로딩 중입니다.")
+
 	page.MustWaitLoad()
 
-	// 로그인 페이지 진입
+	session.pushInfo("메인 페이지 로딩이 완료되었습니다.")
+
+	session.pushInfo("로그인 페이지로 이동합니다.")
+
 	page.MustNavigate("https://www.auc.or.kr/sign/in/base/user")
 
 	go handleLoginDialogs(page)
 
-	// 페이지 진입 대기
+	session.pushInfo("로그인 페이지 로딩을 기다리고 있습니다.")
+
 	page.MustWaitLoad()
 
-	// 통합 로그인 클릭
+	session.pushInfo("로그인 페이지 로딩이 완료되었습니다.")
+
+	session.pushInfo("통합 로그인 버튼을 클릭합니다.")
+
 	page.MustElement(".total-loginN__btn").MustClick()
 
-	// 페이지 진입 대기
+	session.pushInfo("로그인 대기 화면으로 이동하는 중입니다.")
+
 	page.MustWaitLoad()
 
-	w.WriteHeader(http.StatusOK)
+	session.pushInfo("로그인 대기 화면 준비 완료.")
+
 	w.Write([]byte("로그인 페이지 진입 완료"))
 }
 
@@ -84,7 +106,10 @@ func handleLoginDialogs(page *rod.Page) {
 }
 
 func Close(w http.ResponseWriter, r *http.Request) {
-	if sessionID, _, ok := getSessionFromRequest(r); ok {
+	if sessionID, session, ok := getSessionFromRequest(r); ok {
+		if session != nil {
+			session.pushInfo("사용자 요청으로 브라우저를 종료합니다.")
+		}
 		cleanupSession(sessionID)
 	}
 	w.WriteHeader(http.StatusOK)
@@ -101,9 +126,11 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	defer session.mu.Unlock()
 
 	page := session.page
+	session.pushInfo("브라우저 새로고침을 요청했습니다.")
 	page.MustReload()
 	// 페이지 진입 대기
 	page.MustWaitLoad()
+	session.pushInfo("브라우저 새로고침이 완료되었습니다.")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("브라우저 새로고침 완료"))
 }

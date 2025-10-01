@@ -43,6 +43,38 @@
           transform: rotate(360deg);
         }
       }
+
+      #status-log {
+        max-height: 160px;
+        overflow-y: auto;
+        padding: 12px;
+        background-color: #f5f5f5;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .status-entry {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #333333;
+      }
+
+      .status-entry time {
+        font-size: 0.8rem;
+        color: #666666;
+      }
+
+      .status-entry.error {
+        color: #b00020;
+      }
+
+      #overlay-message {
+        text-align: center;
+      }
     </style>
   </head>
   <body style="zoom: 0.9">
@@ -52,6 +84,14 @@
       </nav>
       <div class="space"></div>
       <hr />
+      <nav>
+        <p class="bold">진행 상태</p>
+      </nav>
+      <nav>
+        <div id="status-log" role="log" aria-live="polite">
+          <p id="status-empty" class="muted">상태 정보를 기다리는 중입니다.</p>
+        </div>
+      </nav>
       <nav>
         <p class="bold">강습 신청</p>
       </nav>
@@ -121,12 +161,21 @@
     </main>
     <div id="overlay" role="status" aria-live="polite" aria-busy="true">
       <div class="spinner" aria-hidden="true"></div>
-      <div>잠시만 기다려주세요...</div>
+      <div id="overlay-message">잠시만 기다려주세요...</div>
     </div>
     <script>
       const overlay = document.getElementById("overlay");
+      const overlayMessage = document.getElementById("overlay-message");
+      const statusLog = document.getElementById("status-log");
+      let statusEmpty = document.getElementById("status-empty");
+      let statusSource = null;
+      let statusReconnectTimer = null;
+      let lastStatusMessage = "잠시만 기다려주세요...";
 
       function showOverlay() {
+        if (overlayMessage) {
+          overlayMessage.textContent = lastStatusMessage;
+        }
         overlay.classList.add("visible");
       }
 
@@ -149,6 +198,94 @@
         }
       }
 
+      function appendStatusEntry(payload) {
+        if (!statusLog || !payload || !payload.message) {
+          return;
+        }
+        if (statusEmpty) {
+          statusEmpty.remove();
+          statusEmpty = null;
+        }
+
+        const entry = document.createElement("div");
+        entry.className = "status-entry";
+        if (payload.level === "error") {
+          entry.classList.add("error");
+        }
+
+        const timeEl = document.createElement("time");
+        const timestamp = payload.at ? new Date(payload.at) : new Date();
+        timeEl.textContent = timestamp.toLocaleTimeString("ko-KR", { hour12: false });
+        entry.appendChild(timeEl);
+
+        const messageEl = document.createElement("span");
+        messageEl.textContent = payload.message;
+        entry.appendChild(messageEl);
+
+        statusLog.prepend(entry);
+        while (statusLog.children.length > 20) {
+          statusLog.removeChild(statusLog.lastElementChild);
+        }
+      }
+
+      function handleStatusPayload(payload) {
+        if (!payload || !payload.message) {
+          return;
+        }
+        lastStatusMessage = payload.message;
+        if (overlay.classList.contains("visible") && overlayMessage) {
+          overlayMessage.textContent = lastStatusMessage;
+        }
+        appendStatusEntry(payload);
+      }
+
+      function cleanupStatusStream() {
+        if (statusSource) {
+          statusSource.close();
+          statusSource = null;
+        }
+      }
+
+      function scheduleStatusReconnect() {
+        if (statusReconnectTimer) {
+          return;
+        }
+        statusReconnectTimer = setTimeout(() => {
+          statusReconnectTimer = null;
+          setupStatusStream();
+        }, 3000);
+      }
+
+      function setupStatusStream() {
+        cleanupStatusStream();
+        if (statusReconnectTimer) {
+          clearTimeout(statusReconnectTimer);
+          statusReconnectTimer = null;
+        }
+        try {
+          statusSource = new EventSource("/status/stream");
+        } catch (err) {
+          console.error("status stream init failed", err);
+          scheduleStatusReconnect();
+          return;
+        }
+        statusSource.onmessage = (event) => {
+          if (!event.data) {
+            return;
+          }
+          try {
+            const payload = JSON.parse(event.data);
+            handleStatusPayload(payload);
+          } catch (err) {
+            console.error("status event parse failed", err);
+          }
+        };
+        statusSource.onerror = () => {
+          cleanupStatusStream();
+          scheduleStatusReconnect();
+        };
+      }
+
       function refreshScreenshot(showError) {
         const img = document.getElementById("screenshot");
         if (!img) {
@@ -158,7 +295,7 @@
           .then((res) => {
             if (!res.ok) {
               return res.text().then((text) => {
-                throw new Error(text || "화면 캡처에 실패했습니다.");
+                throw new Error(text || "화면 캡처를 불러오지 못했습니다.");
               });
             }
             return res.json();
@@ -167,9 +304,7 @@
             img.src = data.image;
             if (data.capturedAt) {
               const captured = new Date(data.capturedAt);
-              updateScreenshotInfo(
-                "촬영 시각: " + captured.toLocaleString("ko-KR")
-              );
+              updateScreenshotInfo("촬영 시각: " + captured.toLocaleString("ko-KR"));
             } else {
               updateScreenshotInfo("최신 화면을 불러왔습니다.");
             }
@@ -233,7 +368,7 @@
 
       function action(code) {
         if (code === "4") {
-          if (!confirm("[❗경고] 원클릭 신청 (실험중)\n진행하시겠습니까?")) {
+          if (!confirm("[특경로] 빠른 신청 (실험)\n진행하시겠습니까?")) {
             return;
           }
         }
@@ -244,7 +379,10 @@
           .finally(() => refreshScreenshot(false));
       }
 
+      window.addEventListener("beforeunload", cleanupStatusStream);
+
       refreshScreenshot(false);
+      setupStatusStream();
     </script>
   </body>
 </html>

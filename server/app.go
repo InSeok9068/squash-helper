@@ -26,17 +26,124 @@ type userSession struct {
 	mu         sync.Mutex
 	createdAt  time.Time
 	lastActive time.Time
+
+	statusMu          sync.RWMutex
+	statusHistory     []statusEvent
+	statusSubscribers map[uint64]chan statusEvent
+	statusNextID      uint64
+}
+
+type statusEvent struct {
+	Level   string    `json:"level"`
+	Message string    `json:"message"`
+	At      time.Time `json:"at"`
 }
 
 const (
-	sessionCookieName = "squash-helper-session"
-	sessionTTL        = time.Hour
+	sessionCookieName  = "squash-helper-session"
+	sessionTTL         = time.Hour
+	statusHistoryLimit = 50
 )
 
 var (
 	sessionMu sync.RWMutex
 	sessions  = make(map[string]*userSession)
 )
+
+func (s *userSession) pushStatus(level, message string) {
+	if s == nil {
+		return
+	}
+
+	level = strings.TrimSpace(level)
+	if level == "" {
+		level = "info"
+	}
+
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+
+	ev := statusEvent{
+		Level:   level,
+		Message: message,
+		At:      time.Now(),
+	}
+
+	s.statusMu.Lock()
+	if s.statusSubscribers == nil {
+		s.statusSubscribers = make(map[uint64]chan statusEvent)
+	}
+
+	s.statusHistory = append(s.statusHistory, ev)
+	if len(s.statusHistory) > statusHistoryLimit {
+		s.statusHistory = s.statusHistory[len(s.statusHistory)-statusHistoryLimit:]
+	}
+
+	for _, ch := range s.statusSubscribers {
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+
+	s.statusMu.Unlock()
+}
+
+func (s *userSession) pushInfo(message string) {
+	s.pushStatus("info", message)
+}
+
+func (s *userSession) pushError(message string) {
+	s.pushStatus("error", message)
+}
+
+func (s *userSession) subscribeStatus() (chan statusEvent, []statusEvent, func()) {
+	if s == nil {
+		return nil, nil, func() {}
+	}
+
+	s.statusMu.Lock()
+	if s.statusSubscribers == nil {
+		s.statusSubscribers = make(map[uint64]chan statusEvent)
+	}
+
+	ch := make(chan statusEvent, 16)
+	id := s.statusNextID
+	s.statusNextID++
+	s.statusSubscribers[id] = ch
+	history := append([]statusEvent(nil), s.statusHistory...)
+	s.statusMu.Unlock()
+
+	cleaned := false
+	cleanup := func() {
+		s.statusMu.Lock()
+		if !cleaned {
+			if existing, ok := s.statusSubscribers[id]; ok {
+				delete(s.statusSubscribers, id)
+				close(existing)
+			}
+			cleaned = true
+		}
+		s.statusMu.Unlock()
+	}
+
+	return ch, history, cleanup
+}
+
+func (s *userSession) closeStatusSubscribers() {
+	if s == nil {
+		return
+	}
+
+	s.statusMu.Lock()
+	for id, ch := range s.statusSubscribers {
+		close(ch)
+		delete(s.statusSubscribers, id)
+	}
+	s.statusMu.Unlock()
+}
 
 func Run() {
 	// 임베드 FS의 루트를 / 하위로 설정
@@ -53,6 +160,7 @@ func Run() {
 	mux.HandleFunc("/screenshot", Screenshot)
 	mux.HandleFunc("/refresh", Refresh)
 	mux.HandleFunc("/close", Close)
+	mux.HandleFunc("/status/stream", StatusStream)
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
 	go startSessionReaper()
@@ -105,13 +213,17 @@ func cleanupSession(sessionID string) {
 	}
 
 	session.mu.Lock()
-	defer session.mu.Unlock()
-
 	if session.browser != nil {
 		if err := session.browser.Close(); err != nil {
 			log.Printf("세션 %s 브라우저 종료 실패: %v", sessionID, err)
 		}
 	}
+	session.browser = nil
+	session.page = nil
+	session.mu.Unlock()
+
+	session.pushInfo("세션이 종료되었습니다.")
+	session.closeStatusSubscribers()
 }
 
 func setSessionCookie(w http.ResponseWriter, sessionID string) {
@@ -198,6 +310,8 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	session.pushInfo("로그인 요청을 처리합니다.")
+
 	defer r.Body.Close()
 	var payload struct {
 		ID       string `json:"id"`
@@ -210,6 +324,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.TrimSpace(payload.ID) == "" || strings.TrimSpace(payload.Password) == "" {
+		session.pushError("아이디와 비밀번호를 모두 입력해 주세요.")
 		http.Error(w, "아이디와 비밀번호를 모두 입력해주세요.", http.StatusBadRequest)
 		return
 	}
@@ -220,33 +335,42 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	page := session.page
 
 	// 아이디 입력
+	session.pushInfo("아이디 입력 필드를 찾습니다.")
 	login_id := page.MustElement("#login_id")
 	login_id.MustInput(payload.ID)
+	session.pushInfo("아이디 입력을 완료했습니다.")
 	time.Sleep(1 * time.Second)
 
 	// 비밀번호 입력
+	session.pushInfo("비밀번호 입력 필드를 찾습니다.")
 	login_password := page.MustElement("#login_pwd")
 	login_password.MustInput(payload.Password)
+	session.pushInfo("비밀번호 입력을 완료했습니다.")
 	time.Sleep(1 * time.Second)
 
 	// 로그인 버튼 클릭
+	session.pushInfo("로그인 버튼을 클릭합니다.")
 	buttons := page.MustElements("button")
 	for _, button := range buttons {
 		if button.MustText() == "로그인" {
 			button.MustClick()
+			session.pushInfo("로그인 버튼을 클릭했습니다.")
 			break
 		}
 	}
 	// 페이지 진입 대기
+	session.pushInfo("로그인 결과를 확인 중입니다.")
 	page.MustWaitLoad()
 	time.Sleep(3 * time.Second)
 
 	url := page.MustInfo().URL
 	if strings.HasPrefix(url, "https://newsso.anyang.go.kr/") {
+		session.pushError("로그인에 실패했습니다. 아이디와 비밀번호를 확인해 주세요.")
 		http.Error(w, "로그인 실패하였습니다. 아이디와 비밀번호를 확인해주세요.", http.StatusForbidden)
 		return
 	}
 
+	session.pushInfo("로그인에 성공했습니다.")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("로그인 완료"))
 }
@@ -261,9 +385,12 @@ func Move(w http.ResponseWriter, r *http.Request) {
 	defer session.mu.Unlock()
 
 	page := session.page
+	session.pushInfo("강습 신청 페이지로 이동합니다.")
 	page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
+	session.pushInfo("강습 신청 페이지를 불러오는 중입니다.")
 	// 페이지 진입 대기
 	page.MustWaitLoad()
+	session.pushInfo("강습 신청 페이지 진입을 완료했습니다.")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("강습 신청 페이지 진입 완료"))
 }
@@ -280,132 +407,176 @@ func Action(w http.ResponseWriter, r *http.Request) {
 	page := session.page
 
 	code := r.URL.Query().Get("code")
+	if code != "" {
+		session.pushInfo(fmt.Sprintf("요청 코드 %s 작업을 시작합니다.", code))
+	}
+
 	switch code {
 	case "1":
-		{
-			// [구버전
-			// sel := page.MustElement("#areaGbn")
-			// sel.MustClick() // 드롭다운 열기
-			// sel.MustSelect("호계스쿼시")
-			// w.WriteHeader(http.StatusOK)
-			// w.Write([]byte("강습 구분 선택 완료"))
-			if forceSelect(page, "#areaGbn", "호계스쿼시") {
-				// 페이지 진입 대기
-				page.MustWaitLoad()
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("강습 구분 선택 완료"))
-			} else {
-				http.Error(w, "강습 구분 선택 실패", http.StatusNotFound)
-				return
-			}
-		}
-	case "2":
-		{
-			// [구버전]
-			// entranceType := page.MustElement("#entranceType")
-			// entranceType.MustClick() // 드롭다운 열기
-			// entranceType.MustSelect("화목(강습)")
-			// w.WriteHeader(http.StatusOK)
-			// w.Write([]byte("강습 과정 선택 완료"))
-			if forceSelect(page, "#entranceType", "화목(강습)") {
-				// 페이지 진입 대기
-				page.MustWaitLoad()
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("강습 과정 선택 완료"))
-			} else {
-				http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
-				return
-			}
-		}
-	case "3":
-		{
-			// <a href="#" onclick="insertOrderSeq('11','218','주2일(화,목)','03','주2일(화,목)','11:00 - 12:30','배드민턴','임미정');" class="common_btn regist">신청</a>
-			btns := page.MustElements("a.common_btn.regist")
-			clicked := false
-			for _, btn := range btns {
-				html := btn.MustProperty("outerHTML").String()
-
-				// if strings.Contains(html, "주2일(화,목)") &&
-				// 	strings.Contains(html, "11:00 - 12:30") &&
-				// 	strings.Contains(html, "신청") {
-				if strings.Contains(html, "화목(강습)") &&
-					strings.Contains(html, "20:00 - 21:00") &&
-					strings.Contains(html, "신청") {
-
-					// [구버전]
-					// btn.MustClick()
-
-					btn.MustEval(`() => this.click()`)
-
-					clicked = true
-					// 페이지 진입 대기
-					page.MustWaitLoad()
-					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("강습 시간 선택 완료"))
-					break // 하나만 클릭하고 종료
-				}
-			}
-
-			if !clicked {
-				http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
-				return
-			}
-		}
-	case "4":
-		{
-			page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
+		session.pushInfo("강습 구분을 선택합니다.")
+		if forceSelect(page, "#areaGbn", "호계스쿼시") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
+			session.pushInfo("강습 구분 선택을 완료했습니다.")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("강습 구분 선택 완료"))
+		} else {
+			session.pushError("강습 구분 선택에 실패했습니다.")
+			http.Error(w, "강습 구분 선택 실패", http.StatusNotFound)
+		}
+	case "2":
+		session.pushInfo("강습 과정을 선택합니다.")
+		if forceSelect(page, "#entranceType", "화목(강습)") {
+			// 페이지 진입 대기
+			page.MustWaitLoad()
+			session.pushInfo("강습 과정 선택을 완료했습니다.")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("강습 과정 선택 완료"))
+		} else {
+			session.pushError("강습 과정 선택에 실패했습니다.")
+			http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
+		}
+	case "3":
+		session.pushInfo("조건에 맞는 강습 시간을 찾는 중입니다.")
+		btns := page.MustElements("a.common_btn.regist")
+		clicked := false
+		for _, btn := range btns {
+			html := btn.MustProperty("outerHTML").String()
+
+			if strings.Contains(html, "화목(강습)") &&
+				strings.Contains(html, "20:00 - 21:00") &&
+				strings.Contains(html, "신청") {
+				btn.MustEval(`() => this.click()`)
+				clicked = true
+				// 페이지 진입 대기
+				page.MustWaitLoad()
+				session.pushInfo("강습 시간 선택을 완료했습니다.")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("강습 시간 선택 완료"))
+				break
+			}
+		}
+
+		if !clicked {
+			session.pushError("조건에 맞는 강습 시간을 찾지 못했습니다.")
+			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
+		}
+	case "4":
+		session.pushInfo("강습 목록 페이지로 이동합니다.")
+		page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
+		// 페이지 진입 대기
+		page.MustWaitLoad()
+		session.pushInfo("강습 목록 페이지 로딩이 완료되었습니다.")
+		time.Sleep(500 * time.Millisecond)
+
+		session.pushInfo("강습 구분을 다시 선택합니다.")
+		if forceSelect(page, "#areaGbn", "호계스쿼시") {
+			// 페이지 진입 대기
+			page.MustWaitLoad()
+			session.pushInfo("강습 구분 재선택을 완료했습니다.")
 			time.Sleep(500 * time.Millisecond)
+		} else {
+			session.pushError("강습 구분 재선택에 실패했습니다.")
+			http.Error(w, "강습 구분 선택 실패", http.StatusNotFound)
+			return
+		}
 
-			if forceSelect(page, "#areaGbn", "호계스쿼시") {
+		session.pushInfo("강습 과정을 다시 선택합니다.")
+		if forceSelect(page, "#entranceType", "화목(강습)") {
+			// 페이지 진입 대기
+			page.MustWaitLoad()
+			session.pushInfo("강습 과정 재선택을 완료했습니다.")
+			time.Sleep(500 * time.Millisecond)
+		} else {
+			session.pushError("강습 과정 재선택에 실패했습니다.")
+			http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
+			return
+		}
+
+		session.pushInfo("조건에 맞는 정기 강습 시간을 찾는 중입니다.")
+		btns := page.MustElements("a.common_btn.regist")
+		clicked := false
+		for _, btn := range btns {
+			html := btn.MustProperty("outerHTML").String()
+
+			if strings.Contains(html, "화목(강습)") &&
+				strings.Contains(html, "20:00 - 21:00") &&
+				strings.Contains(html, "신청") {
+				btn.MustEval(`() => this.click()`)
+				clicked = true
 				// 페이지 진입 대기
 				page.MustWaitLoad()
-				time.Sleep(500 * time.Millisecond)
-			} else {
-				http.Error(w, "강습 구분 선택 실패", http.StatusNotFound)
+				session.pushInfo("정기 강습 시간 선택을 완료했습니다.")
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("강습 시간 선택 완료"))
+				break
+			}
+		}
+
+		if !clicked {
+			session.pushError("조건에 맞는 정기 강습 시간을 찾지 못했습니다.")
+			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
+		}
+	default:
+		http.Error(w, "알 수 없는 작업 코드입니다.", http.StatusBadRequest)
+	}
+}
+
+func StatusStream(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE를 지원하지 않는 환경입니다.", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ch, history, cleanup := session.subscribeStatus()
+	defer cleanup()
+
+	sendEvent := func(ev statusEvent) bool {
+		payload, err := json.Marshal(ev)
+		if err != nil {
+			log.Printf("상태 이벤트 직렬화 실패: %v", err)
+			return true
+		}
+
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+			return false
+		}
+
+		flusher.Flush()
+		return true
+	}
+
+	for _, ev := range history {
+		if !sendEvent(ev) {
+			return
+		}
+	}
+
+	session.pushInfo("상태 모니터링이 연결되었습니다.")
+
+	ctx := r.Context()
+	for {
+		select {
+		case ev, ok := <-ch:
+			if !ok {
 				return
 			}
-
-			if forceSelect(page, "#entranceType", "화목(강습)") {
-				// 페이지 진입 대기
-				page.MustWaitLoad()
-				time.Sleep(500 * time.Millisecond)
-			} else {
-				http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
+			if !sendEvent(ev) {
 				return
 			}
-
-			btns := page.MustElements("a.common_btn.regist")
-			clicked := false
-			for _, btn := range btns {
-				html := btn.MustProperty("outerHTML").String()
-
-				// if strings.Contains(html, "주2일(화,목)") &&
-				// 	strings.Contains(html, "11:00 - 12:30") &&
-				// 	strings.Contains(html, "신청") {
-				if strings.Contains(html, "화목(강습)") &&
-					strings.Contains(html, "20:00 - 21:00") &&
-					strings.Contains(html, "신청") {
-
-					// [구버전]
-					// btn.MustClick()
-
-					btn.MustEval(`() => this.click()`)
-
-					clicked = true
-					// 페이지 진입 대기
-					page.MustWaitLoad()
-					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("강습 시간 선택 완료"))
-					break // 하나만 클릭하고 종료
-				}
-			}
-
-			if !clicked {
-				http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
-				return
-			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -415,6 +586,8 @@ func Screenshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	session.pushInfo("스크린샷을 요청했습니다.")
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
@@ -427,6 +600,7 @@ func Screenshot(w http.ResponseWriter, r *http.Request) {
 	data, err := session.page.Screenshot(true, nil)
 	if err != nil {
 		log.Printf("세션 화면 캡처 실패: %v", err)
+		session.pushError("스크린샷 캡처에 실패했습니다.")
 		http.Error(w, "화면 캡처에 실패했습니다. 잠시 후 다시 시도해주세요.", http.StatusInternalServerError)
 		return
 	}
@@ -439,6 +613,7 @@ func Screenshot(w http.ResponseWriter, r *http.Request) {
 		CapturedAt: time.Now(),
 	}
 
+	session.pushInfo("스크린샷 데이터를 준비했습니다.")
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		log.Printf("스크린샷 응답 인코딩 실패: %v", err)
