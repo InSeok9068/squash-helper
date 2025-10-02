@@ -38,11 +38,9 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 	page.MustNavigate("https://www.auc.or.kr/hogye/main/view")
 
 	session := &userSession{
-		browser:           browser,
-		page:              page,
-		statusSubscribers: make(map[uint64]chan statusEvent),
+		browser: browser,
+		page:    page,
 	}
-	session.pushInfo("브라우저 세션을 준비합니다.")
 	sessionID, err := registerSession(session)
 	if err != nil {
 		_ = browser.Close()
@@ -62,33 +60,17 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	defer session.mu.Unlock()
 
-	session.pushInfo("안양호계센터 메인 페이지 로딩 중입니다.")
-
 	page.MustWaitLoad()
-
-	session.pushInfo("메인 페이지 로딩이 완료되었습니다.")
-
-	session.pushInfo("로그인 페이지로 이동합니다.")
 
 	page.MustNavigate("https://www.auc.or.kr/sign/in/base/user")
 
 	go handleLoginDialogs(page)
 
-	session.pushInfo("로그인 페이지 로딩을 기다리고 있습니다.")
-
 	page.MustWaitLoad()
-
-	session.pushInfo("로그인 페이지 로딩이 완료되었습니다.")
-
-	session.pushInfo("통합 로그인 버튼을 클릭합니다.")
 
 	page.MustElement(".total-loginN__btn").MustClick()
 
-	session.pushInfo("로그인 대기 화면으로 이동하는 중입니다.")
-
 	page.MustWaitLoad()
-
-	session.pushInfo("로그인 대기 화면 준비 완료.")
 
 	w.Write([]byte("로그인 페이지 진입 완료"))
 }

@@ -27,10 +27,10 @@ type userSession struct {
 	createdAt  time.Time
 	lastActive time.Time
 
-	statusMu          sync.RWMutex
-	statusHistory     []statusEvent
-	statusSubscribers map[uint64]chan statusEvent
-	statusNextID      uint64
+	statusMu      sync.Mutex
+	statusCh      chan statusEvent
+	lastStatus    statusEvent
+	hasLastStatus bool
 }
 
 type statusEvent struct {
@@ -40,9 +40,8 @@ type statusEvent struct {
 }
 
 const (
-	sessionCookieName  = "squash-helper-session"
-	sessionTTL         = time.Hour
-	statusHistoryLimit = 50
+	sessionCookieName = "squash-helper-session"
+	sessionTTL        = time.Hour
 )
 
 var (
@@ -72,22 +71,14 @@ func (s *userSession) pushStatus(level, message string) {
 	}
 
 	s.statusMu.Lock()
-	if s.statusSubscribers == nil {
-		s.statusSubscribers = make(map[uint64]chan statusEvent)
-	}
-
-	s.statusHistory = append(s.statusHistory, ev)
-	if len(s.statusHistory) > statusHistoryLimit {
-		s.statusHistory = s.statusHistory[len(s.statusHistory)-statusHistoryLimit:]
-	}
-
-	for _, ch := range s.statusSubscribers {
+	s.lastStatus = ev
+	s.hasLastStatus = true
+	if s.statusCh != nil {
 		select {
-		case ch <- ev:
+		case s.statusCh <- ev:
 		default:
 		}
 	}
-
 	s.statusMu.Unlock()
 }
 
@@ -105,26 +96,23 @@ func (s *userSession) subscribeStatus() (chan statusEvent, []statusEvent, func()
 	}
 
 	s.statusMu.Lock()
-	if s.statusSubscribers == nil {
-		s.statusSubscribers = make(map[uint64]chan statusEvent)
+	prev := s.statusCh
+	if prev != nil {
+		close(prev)
 	}
-
 	ch := make(chan statusEvent, 16)
-	id := s.statusNextID
-	s.statusNextID++
-	s.statusSubscribers[id] = ch
-	history := append([]statusEvent(nil), s.statusHistory...)
+	s.statusCh = ch
+	var history []statusEvent
+	if s.hasLastStatus {
+		history = append(history, s.lastStatus)
+	}
 	s.statusMu.Unlock()
 
-	cleaned := false
 	cleanup := func() {
 		s.statusMu.Lock()
-		if !cleaned {
-			if existing, ok := s.statusSubscribers[id]; ok {
-				delete(s.statusSubscribers, id)
-				close(existing)
-			}
-			cleaned = true
+		if s.statusCh == ch {
+			close(ch)
+			s.statusCh = nil
 		}
 		s.statusMu.Unlock()
 	}
@@ -132,15 +120,15 @@ func (s *userSession) subscribeStatus() (chan statusEvent, []statusEvent, func()
 	return ch, history, cleanup
 }
 
-func (s *userSession) closeStatusSubscribers() {
+func (s *userSession) closeStatusChannel() {
 	if s == nil {
 		return
 	}
 
 	s.statusMu.Lock()
-	for id, ch := range s.statusSubscribers {
-		close(ch)
-		delete(s.statusSubscribers, id)
+	if s.statusCh != nil {
+		close(s.statusCh)
+		s.statusCh = nil
 	}
 	s.statusMu.Unlock()
 }
@@ -223,7 +211,7 @@ func cleanupSession(sessionID string) {
 	session.mu.Unlock()
 
 	session.pushInfo("세션이 종료되었습니다.")
-	session.closeStatusSubscribers()
+	session.closeStatusChannel()
 }
 
 func setSessionCookie(w http.ResponseWriter, sessionID string) {
@@ -469,26 +457,26 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		session.pushInfo("강습 목록 페이지 로딩이 완료되었습니다.")
 		time.Sleep(500 * time.Millisecond)
 
-		session.pushInfo("강습 구분을 다시 선택합니다.")
+		session.pushInfo("강습 구분을 선택합니다.")
 		if forceSelect(page, "#areaGbn", "호계스쿼시") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
-			session.pushInfo("강습 구분 재선택을 완료했습니다.")
+			session.pushInfo("강습 구분 선택을 완료했습니다.")
 			time.Sleep(500 * time.Millisecond)
 		} else {
-			session.pushError("강습 구분 재선택에 실패했습니다.")
+			session.pushError("강습 구분 선택에 실패했습니다.")
 			http.Error(w, "강습 구분 선택 실패", http.StatusNotFound)
 			return
 		}
 
-		session.pushInfo("강습 과정을 다시 선택합니다.")
+		session.pushInfo("강습 과정을 선택합니다.")
 		if forceSelect(page, "#entranceType", "화목(강습)") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
-			session.pushInfo("강습 과정 재선택을 완료했습니다.")
+			session.pushInfo("강습 과정 선택을 완료했습니다.")
 			time.Sleep(500 * time.Millisecond)
 		} else {
-			session.pushError("강습 과정 재선택에 실패했습니다.")
+			session.pushError("강습 과정 선택에 실패했습니다.")
 			http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
 			return
 		}
@@ -506,7 +494,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 				clicked = true
 				// 페이지 진입 대기
 				page.MustWaitLoad()
-				session.pushInfo("정기 강습 시간 선택을 완료했습니다.")
+				session.pushInfo("강습 시간 선택을 완료했습니다.")
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 시간 선택 완료"))
 				break
@@ -514,7 +502,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !clicked {
-			session.pushError("조건에 맞는 정기 강습 시간을 찾지 못했습니다.")
+			session.pushError("조건에 맞는 강습 시간을 찾지 못했습니다.")
 			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
 		}
 	default:
@@ -563,7 +551,9 @@ func StatusStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	session.pushInfo("상태 모니터링이 연결되었습니다.")
+	if len(history) == 0 {
+		session.pushInfo("상태 모니터링이 연결되었습니다.")
+	}
 
 	ctx := r.Context()
 	for {
