@@ -378,6 +378,7 @@ func Move(w http.ResponseWriter, r *http.Request) {
 	session.pushInfo("강습 신청 페이지를 불러오는 중입니다.")
 	// 페이지 진입 대기
 	page.MustWaitLoad()
+	removeWaitPage(page)
 	session.pushInfo("강습 신청 페이지 진입을 완료했습니다.")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("강습 신청 페이지 진입 완료"))
@@ -405,6 +406,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		if forceSelect(page, "#areaGbn", "호계스쿼시") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
+			removeWaitPage(page)
 			session.pushInfo("강습 구분 선택을 완료했습니다.")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("강습 구분 선택 완료"))
@@ -417,6 +419,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		if forceSelect(page, "#entranceType", "화목(강습)") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
+			removeWaitPage(page)
 			session.pushInfo("강습 과정 선택을 완료했습니다.")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("강습 과정 선택 완료"))
@@ -461,6 +464,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		if forceSelect(page, "#areaGbn", "호계스쿼시") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
+			removeWaitPage(page)
 			session.pushInfo("강습 구분 선택을 완료했습니다.")
 			time.Sleep(500 * time.Millisecond)
 		} else {
@@ -473,6 +477,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		if forceSelect(page, "#entranceType", "화목(강습)") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
+			removeWaitPage(page)
 			session.pushInfo("강습 과정 선택을 완료했습니다.")
 			time.Sleep(500 * time.Millisecond)
 		} else {
@@ -494,6 +499,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 				clicked = true
 				// 페이지 진입 대기
 				page.MustWaitLoad()
+				removeWaitPage(page)
 				session.pushInfo("강습 시간 선택을 완료했습니다.")
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte("강습 시간 선택 완료"))

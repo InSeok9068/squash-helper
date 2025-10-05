@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
@@ -68,9 +69,13 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	page.MustWaitLoad()
 
+	removeWaitPage(page)
+
 	page.MustElement(".total-loginN__btn").MustClick()
 
 	page.MustWaitLoad()
+
+	removeWaitPage(page)
 
 	w.Write([]byte("로그인 페이지 진입 완료"))
 }
@@ -115,4 +120,11 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	session.pushInfo("브라우저 새로고침이 완료되었습니다.")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("브라우저 새로고침 완료"))
+}
+
+func removeWaitPage(page *rod.Page) {
+	el, _ := page.Timeout(1 * time.Second).Element("#waitPage")
+	if el != nil {
+		_ = el.Remove()
+	}
 }
