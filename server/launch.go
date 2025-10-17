@@ -122,6 +122,23 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("브라우저 새로고침 완료"))
 }
 
+func RemoveWaiting(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := requireSession(w, r)
+	if !ok {
+		return
+	}
+
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	page := session.page
+	session.pushInfo("사용자 요청으로 대기열을 제거합니다.")
+	removeWaitPage(page)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("대기열 제거 완료"))
+}
+
 func removeWaitPage(page *rod.Page) {
 	el, _ := page.Timeout(1 * time.Second).Element("#waitPage")
 	if el != nil {

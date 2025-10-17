@@ -148,6 +148,7 @@ func Run() {
 	mux.HandleFunc("/screenshot", Screenshot)
 	mux.HandleFunc("/refresh", Refresh)
 	mux.HandleFunc("/close", Close)
+	mux.HandleFunc("/remove-waiting", RemoveWaiting)
 	mux.HandleFunc("/status/stream", StatusStream)
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 

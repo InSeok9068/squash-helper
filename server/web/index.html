@@ -64,6 +64,7 @@
           <legend>브라우저</legend>
           <button onclick="browserLaunch()">실행</button>
           <button onclick="browserRefresh()">새로고침</button>
+          <button onclick="browserRemoveWaiting()">수동 대기열 제거</button>
           <button class="border red-text bold" onclick="browserClose()">
             ❗종료
           </button>
@@ -174,7 +175,7 @@
 
       function hasActiveSession() {
         return document.cookie
-          .split(';')
+          .split(";")
           .map((part) => part.trim())
           .some((part) => part.startsWith(`${SESSION_COOKIE_NAME}=`));
       }
@@ -283,6 +284,14 @@
       function browserRefresh() {
         showOverlay();
         fetch("/refresh")
+          .then(handleResponse)
+          .catch((err) => alert(err))
+          .finally(() => refreshScreenshot(false));
+      }
+
+      function browserRemoveWaiting() {
+        showOverlay();
+        fetch("/remove-waiting")
           .then(handleResponse)
           .catch((err) => alert(err))
           .finally(() => refreshScreenshot(false));
