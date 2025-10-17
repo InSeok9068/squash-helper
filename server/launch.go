@@ -140,8 +140,13 @@ func RemoveWaiting(w http.ResponseWriter, r *http.Request) {
 }
 
 func removeWaitPage(page *rod.Page) {
-	el, _ := page.Timeout(1 * time.Second).Element("#waitPage")
-	if el != nil {
+	// 대기열 제거 (삭제)
+	if el, _ := page.Timeout(1 * time.Second).Element("#waitPage"); el != nil {
 		_ = el.Remove()
 	}
+
+	// // 대기열 제거 (숨김)
+	// if el, _ := page.Timeout(1 * time.Second).Element("#waitPage"); el != nil {
+	// 	_, _ = el.Eval(`this.style.display = "none"`)
+	// }
 }
