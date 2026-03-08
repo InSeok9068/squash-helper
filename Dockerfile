@@ -9,10 +9,7 @@ ARG BROWSER_BASE_IMAGE=browser-base
 FROM debian:bookworm-slim AS browser-base
 ENV DEBIAN_FRONTEND=noninteractive
 ENV BROWSER_BIN=/usr/bin/chromium
-# APT 캐시 마운트 (BuildKit 필요)
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update; \
+RUN apt-get update; \
     apt-get install -y --no-install-recommends \
       chromium ca-certificates tzdata fonts-liberation \
       fonts-noto-cjk fonts-noto-color-emoji fonts-nanum \

@@ -50,5 +50,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 🔽 GitHub Actions cache backend for reusable build layers
           cache-from: type=gha,scope=browser-base
           cache-to: type=gha,mode=max,scope=browser-base

@@ -67,7 +67,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BROWSER_BASE_IMAGE=${{ steps.browser_base.outputs.base_image }}
-          # 🔽 BuildKit 캐시 (레이어/마운트 포함) 실행 간 재사용
+          # 🔽 GitHub Actions cache backend for reusable build layers
           cache-from: type=gha,scope=app
           cache-to: type=gha,mode=max,scope=app
 
