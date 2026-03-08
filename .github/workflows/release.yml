@@ -8,6 +8,8 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  # Chromium / 폰트 패키지 구성을 바꾸면 browser-base workflow와 함께 버전을 올린다.
+  BROWSER_BASE_TAG: browser-base-bookworm-arm64-v1
 
 jobs:
   build-and-push:
@@ -41,17 +43,33 @@ jobs:
             type=raw,value=release
             type=sha
 
+      - name: Resolve browser base image
+        id: browser_base
+        shell: bash
+        run: |
+          base_image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.BROWSER_BASE_TAG }}"
+
+          if docker buildx imagetools inspect "$base_image" >/dev/null 2>&1; then
+            echo "base_image=$base_image" >> "$GITHUB_OUTPUT"
+          else
+            echo "base_image=browser-base" >> "$GITHUB_OUTPUT"
+            echo "Browser base image not found, falling back to local browser-base stage for this build."
+          fi
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/arm64
+          pull: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BROWSER_BASE_IMAGE=${{ steps.browser_base.outputs.base_image }}
           # 🔽 BuildKit 캐시 (레이어/마운트 포함) 실행 간 재사용
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
 
       - name: Restart Server
         uses: appleboy/ssh-action@master
