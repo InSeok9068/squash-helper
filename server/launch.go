@@ -1,7 +1,11 @@
 package server
 
 import (
+	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -15,7 +19,14 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		cleanupSession(sessionID)
 	}
 
-	u := launcher.New().
+	bin, err := findBrowserBinary()
+	if err != nil {
+		log.Printf("browser launch skipped: %v", err)
+		http.Error(w, "브라우저 실행 파일을 찾지 못했습니다. 배포 이미지에 chromium이 포함되어 있는지 확인해주세요.", http.StatusInternalServerError)
+		return
+	}
+
+	l := launcher.New().
 		Leakless(false).
 		NoSandbox(true).
 		HeadlessNew(true).
@@ -32,10 +43,30 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		Append("--disable-backgrounding-occluded-windows").
 		// 창 사이즈 설정
 		Set("window-size", "1280,800").
-		MustLaunch()
+		Bin(bin)
 
-	browser := rod.New().ControlURL(u).MustConnect()
-	page := stealth.MustPage(browser)
+	u, err := l.Launch()
+	if err != nil {
+		log.Printf("browser launch failed with %q: %v", bin, err)
+		http.Error(w, "브라우저 실행에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
+		return
+	}
+
+	browser := rod.New().ControlURL(u)
+	if err := browser.Connect(); err != nil {
+		log.Printf("browser connect failed: %v", err)
+		http.Error(w, "브라우저 연결에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
+		return
+	}
+
+	page, err := stealth.Page(browser)
+	if err != nil {
+		_ = browser.Close()
+		log.Printf("stealth page creation failed: %v", err)
+		http.Error(w, "브라우저 페이지 초기화에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
+		return
+	}
+
 	page.MustNavigate("https://www.auc.or.kr/hogye/main/view")
 
 	session := &userSession{
@@ -78,6 +109,37 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 	removeWaitPage(page)
 
 	w.Write([]byte("로그인 페이지 진입 완료"))
+}
+
+func findBrowserBinary() (string, error) {
+	candidates := []string{
+		os.Getenv("ROD_BROWSER_BIN"),
+		os.Getenv("BROWSER_BIN"),
+		"/usr/bin/chromium",
+		"/usr/bin/chromium-browser",
+	}
+
+	if found, ok := launcher.LookPath(); ok {
+		candidates = append(candidates, found)
+	}
+
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+
+		path, err := exec.LookPath(candidate)
+		if err == nil {
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("no chromium binary found in candidates: %v", candidates)
 }
 
 func handleLoginDialogs(page *rod.Page) {
