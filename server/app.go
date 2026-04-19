@@ -429,31 +429,40 @@ func Action(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
 		}
 	case "3":
-		session.pushInfo("조건에 맞는 강습 시간을 찾는 중입니다.")
-		btns := page.MustElements("a.common_btn.regist")
-		clicked := false
-		for _, btn := range btns {
-			html := btn.MustProperty("outerHTML").String()
-
-			if strings.Contains(html, "화목(강습)") &&
-				strings.Contains(html, "20:00 - 21:00") &&
-				strings.Contains(html, "신청") {
-				btn.MustEval(`() => this.click()`)
-				clicked = true
-				// 페이지 진입 대기
-				page.MustWaitLoad()
-				session.pushInfo("강습 시간 선택을 완료했습니다.")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("강습 시간 선택 완료"))
-				break
-			}
+		session.pushInfo("강습 과정을 선택합니다.")
+		if forceSelect(page, "#entranceType", "월수(강습)") {
+			page.MustWaitLoad()
+			removeWaitPage(page)
+			session.pushInfo("강습 과정 선택을 완료했습니다.")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("강습 과정 선택 완료"))
+		} else {
+			session.pushError("강습 과정 선택에 실패했습니다.")
+			http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
 		}
-
-		if !clicked {
+	case "4":
+		session.pushInfo("조건에 맞는 강습 시간을 찾는 중입니다.")
+		if clickLessonTime(page, "화목(강습)", "20:00 - 21:00") {
+			page.MustWaitLoad()
+			session.pushInfo("강습 시간 선택을 완료했습니다.")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("강습 시간 선택 완료"))
+		} else {
 			session.pushError("조건에 맞는 강습 시간을 찾지 못했습니다.")
 			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
 		}
-	case "4":
+	case "5":
+		session.pushInfo("조건에 맞는 강습 시간을 찾는 중입니다.")
+		if clickLessonTime(page, "월수(강습)", "20:00 - 21:00") {
+			page.MustWaitLoad()
+			session.pushInfo("강습 시간 선택을 완료했습니다.")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("강습 시간 선택 완료"))
+		} else {
+			session.pushError("조건에 맞는 강습 시간을 찾지 못했습니다.")
+			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
+		}
+	case "9":
 		session.pushInfo("강습 목록 페이지로 이동합니다.")
 		page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
 		// 페이지 진입 대기
@@ -488,27 +497,13 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 
 		session.pushInfo("조건에 맞는 정기 강습 시간을 찾는 중입니다.")
-		btns := page.MustElements("a.common_btn.regist")
-		clicked := false
-		for _, btn := range btns {
-			html := btn.MustProperty("outerHTML").String()
-
-			if strings.Contains(html, "화목(강습)") &&
-				strings.Contains(html, "20:00 - 21:00") &&
-				strings.Contains(html, "신청") {
-				btn.MustEval(`() => this.click()`)
-				clicked = true
-				// 페이지 진입 대기
-				page.MustWaitLoad()
-				removeWaitPage(page)
-				session.pushInfo("강습 시간 선택을 완료했습니다.")
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("강습 시간 선택 완료"))
-				break
-			}
-		}
-
-		if !clicked {
+		if clickLessonTime(page, "화목(강습)", "20:00 - 21:00") {
+			page.MustWaitLoad()
+			removeWaitPage(page)
+			session.pushInfo("강습 시간 선택을 완료했습니다.")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("강습 시간 선택 완료"))
+		} else {
 			session.pushError("조건에 맞는 강습 시간을 찾지 못했습니다.")
 			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
 		}
@@ -645,4 +640,19 @@ func forceSelect(page *rod.Page, sel string, want string) bool {
 
 		return false;
 	}`, sel, want).Bool()
+}
+
+func clickLessonTime(page *rod.Page, lessonType, timeRange string) bool {
+	btns := page.MustElements("a.common_btn.regist")
+	for _, btn := range btns {
+		html := btn.MustProperty("outerHTML").String()
+		if strings.Contains(html, lessonType) &&
+			strings.Contains(html, timeRange) &&
+			strings.Contains(html, "신청") {
+			btn.MustEval(`() => this.click()`)
+			return true
+		}
+	}
+
+	return false
 }

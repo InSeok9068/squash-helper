@@ -95,11 +95,18 @@
               3. 일자 선택 (화목)
             </button>
             <button class="s12 m2" onclick="action('3')">
-              4. 시간 선택 (화목 8시)
+              4. 일자 선택 (월수)
+            </button>
+            <button class="s12 m2" onclick="action('4')">
+              5. 시간 선택 (화목 8시)
+            </button>
+            <button class="s12 m2" onclick="action('5')">
+              6. 시간 선택 (월수 8시)
             </button>
             <button
               class="s12 m4 border small-round bold red-text"
-              onclick="action('4')"
+              onclick="action('9')"
+              hidden
             >
               [❗경고] 원클릭 신청 (실험중)
             </button>
@@ -323,7 +330,7 @@
       }
 
       function action(code) {
-        if (code === "4") {
+        if (code === "9") {
           if (!confirm("[특경로] 빠른 신청 (실험)\n진행하시겠습니까?")) {
             return;
           }
