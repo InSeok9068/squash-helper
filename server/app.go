@@ -417,7 +417,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 	case "2":
 		session.pushInfo("강습 과정을 선택합니다.")
-		if forceSelect(page, "#entranceType", "화목(강습)") {
+		if forceSelect(page, "#entranceType", "주2일(월,수)") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
 			removeWaitPage(page)
@@ -430,7 +430,19 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 	case "3":
 		session.pushInfo("강습 과정을 선택합니다.")
-		if forceSelect(page, "#entranceType", "월수(강습)") {
+		if clickLessonTime(page, "주2일(월,수)", "20:00 - 21:00") {
+			page.MustWaitLoad()
+			session.pushInfo("강습 시간 선택을 완료했습니다.")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("강습 시간 선택 완료"))
+		} else {
+			session.pushError("조건에 맞는 강습 시간을 찾지 못했습니다.")
+			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
+		}
+	case "4":
+		session.pushInfo("강습 과정을 선택합니다.")
+		if forceSelect(page, "#entranceType", "주2일(화,목)") {
+			// 페이지 진입 대기
 			page.MustWaitLoad()
 			removeWaitPage(page)
 			session.pushInfo("강습 과정 선택을 완료했습니다.")
@@ -440,20 +452,9 @@ func Action(w http.ResponseWriter, r *http.Request) {
 			session.pushError("강습 과정 선택에 실패했습니다.")
 			http.Error(w, "강습 과정 선택 실패", http.StatusNotFound)
 		}
-	case "4":
-		session.pushInfo("조건에 맞는 강습 시간을 찾는 중입니다.")
-		if clickLessonTime(page, "화목(강습)", "20:00 - 21:00") {
-			page.MustWaitLoad()
-			session.pushInfo("강습 시간 선택을 완료했습니다.")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("강습 시간 선택 완료"))
-		} else {
-			session.pushError("조건에 맞는 강습 시간을 찾지 못했습니다.")
-			http.Error(w, "조건에 맞는 강습 시간 버튼을 찾지 못했습니다.", http.StatusNotFound)
-		}
 	case "5":
 		session.pushInfo("조건에 맞는 강습 시간을 찾는 중입니다.")
-		if clickLessonTime(page, "월수(강습)", "20:00 - 21:00") {
+		if clickLessonTime(page, "주2일(화,목)", "20:00 - 21:00") {
 			page.MustWaitLoad()
 			session.pushInfo("강습 시간 선택을 완료했습니다.")
 			w.WriteHeader(http.StatusOK)
@@ -615,7 +616,7 @@ func Screenshot(w http.ResponseWriter, r *http.Request) {
 // forceSelect 은 오버레이와 상관없이 <select>를 강제로 선택하고
 // input/change 이벤트까지 발생시킵니다.
 func forceSelect(page *rod.Page, sel string, want string) bool {
-	return page.MustEval(`(sel, want) => {  
+	return page.MustEval(`(sel, want) => {
 		const s = document.querySelector(sel);
 		if (!s) return false;
 

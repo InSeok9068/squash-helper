@@ -87,29 +87,30 @@
         <fieldset>
           <legend>강습 신청</legend>
           <div class="grid">
-            <button class="s12 m2" onclick="move()">1. 신청 페이지 진입</button>
-            <button class="s12 m2" onclick="action('1')">
-              2. 구분 선택 (스쿼시)
-            </button>
-            <button class="s12 m2" onclick="action('2')">
-              3. 일자 선택 (화목)
-            </button>
-            <button class="s12 m2" onclick="action('3')">
-              4. 일자 선택 (월수)
-            </button>
-            <button class="s12 m2" onclick="action('4')">
-              5. 시간 선택 (화목 8시)
-            </button>
-            <button class="s12 m2" onclick="action('5')">
-              6. 시간 선택 (월수 8시)
-            </button>
-            <button
+            <button class="s12 m2" onclick="move()">신청 페이지 진입</button>
+            <button class="s12 m2" onclick="action('1')">스쿼시 선택</button>
+            <fieldset class="s12">
+              <legend class="bold">월수</legend>
+              <button class="s6 m2" onclick="action('2')">월수 선택</button>
+              <button class="s6 m2" onclick="action('3')">
+                월수 강습 선택
+              </button>
+            </fieldset>
+            <fieldset class="s12">
+              <legend class="bold">화목</legend>
+              <button class="s6 m2 inverse-primary" onclick="action('4')">
+                화목 선택
+              </button>
+              <button class="s6 m2 inverse-primary" onclick="action('5')">
+                화목 강습 신청
+              </button>
+            </fieldset>
+            <!-- <button
               class="s12 m4 border small-round bold red-text"
               onclick="action('9')"
-              hidden
             >
               [❗경고] 원클릭 신청 (실험중)
-            </button>
+            </button> -->
           </div>
         </fieldset>
       </nav>
@@ -253,7 +254,7 @@
             if (data.capturedAt) {
               const captured = new Date(data.capturedAt);
               updateScreenshotInfo(
-                "촬영 시각: " + captured.toLocaleString("ko-KR")
+                "촬영 시각: " + captured.toLocaleString("ko-KR"),
               );
             } else {
               updateScreenshotInfo("최신 화면을 불러왔습니다.");
