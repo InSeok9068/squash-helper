@@ -122,6 +122,9 @@
         <button onclick="browserRemoveWaiting()">[수동] 대기열 제거</button>
       </nav>
       <nav>
+        <p id="current-time" class="muted"></p>
+      </nav>
+      <nav>
         <p id="screenshot-time" class="muted"></p>
       </nav>
       <nav>
@@ -168,6 +171,13 @@
         const timeEl = document.getElementById("screenshot-time");
         if (timeEl) {
           timeEl.textContent = message || "";
+        }
+      }
+
+      function updateCurrentTime() {
+        const timeEl = document.getElementById("current-time");
+        if (timeEl) {
+          timeEl.textContent = "현재 시각: " + new Date().toLocaleString("ko-KR");
         }
       }
 
@@ -345,6 +355,8 @@
 
       window.addEventListener("beforeunload", cleanupStatusStream);
 
+      updateCurrentTime();
+      setInterval(updateCurrentTime, 1000);
       refreshScreenshot(false);
       if (hasActiveSession()) {
         setupStatusStream();
