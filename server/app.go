@@ -404,7 +404,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 	switch code {
 	case "1":
 		session.pushInfo("강습 구분을 선택합니다.")
-		if forceSelect(page, "#areaGbn", "호계스쿼시") {
+		if forceSelectWithFallback(page, "#areaGbn", "호계스쿼시", "스쿼시") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
 			removeWaitPage(page)
@@ -417,7 +417,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 	case "2":
 		session.pushInfo("강습 과정을 선택합니다.")
-		if forceSelect(page, "#entranceType", "주2일(월,수)") {
+		if forceSelectWithFallback(page, "#entranceType", "주2일(월,수)", "월수") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
 			removeWaitPage(page)
@@ -430,7 +430,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 	case "3":
 		session.pushInfo("강습 과정을 선택합니다.")
-		if clickLessonTime(page, "주2일(월,수)", "20:00 - 21:00") {
+		if clickLessonTimeWithFallback(page, "주2일(월,수)", "20:00 - 21:00") {
 			page.MustWaitLoad()
 			session.pushInfo("강습 시간 선택을 완료했습니다.")
 			w.WriteHeader(http.StatusOK)
@@ -441,7 +441,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 	case "4":
 		session.pushInfo("강습 과정을 선택합니다.")
-		if forceSelect(page, "#entranceType", "주2일(화,목)") {
+		if forceSelectWithFallback(page, "#entranceType", "주2일(화,목)", "화목") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
 			removeWaitPage(page)
@@ -454,7 +454,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 	case "5":
 		session.pushInfo("조건에 맞는 강습 시간을 찾는 중입니다.")
-		if clickLessonTime(page, "주2일(화,목)", "20:00 - 21:00") {
+		if clickLessonTimeWithFallback(page, "주2일(화,목)", "20:00 - 21:00") {
 			page.MustWaitLoad()
 			session.pushInfo("강습 시간 선택을 완료했습니다.")
 			w.WriteHeader(http.StatusOK)
@@ -472,7 +472,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(500 * time.Millisecond)
 
 		session.pushInfo("강습 구분을 선택합니다.")
-		if forceSelect(page, "#areaGbn", "호계스쿼시") {
+		if forceSelectWithFallback(page, "#areaGbn", "호계스쿼시", "스쿼시") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
 			removeWaitPage(page)
@@ -485,7 +485,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 
 		session.pushInfo("강습 과정을 선택합니다.")
-		if forceSelect(page, "#entranceType", "화목(강습)") {
+		if forceSelectWithFallback(page, "#entranceType", "화목(강습)", "화목") {
 			// 페이지 진입 대기
 			page.MustWaitLoad()
 			removeWaitPage(page)
@@ -498,7 +498,7 @@ func Action(w http.ResponseWriter, r *http.Request) {
 		}
 
 		session.pushInfo("조건에 맞는 정기 강습 시간을 찾는 중입니다.")
-		if clickLessonTime(page, "화목(강습)", "20:00 - 21:00") {
+		if clickLessonTimeWithFallback(page, "화목(강습)", "20:00 - 21:00") {
 			page.MustWaitLoad()
 			removeWaitPage(page)
 			session.pushInfo("강습 시간 선택을 완료했습니다.")
@@ -643,6 +643,30 @@ func forceSelect(page *rod.Page, sel string, want string) bool {
 	}`, sel, want).Bool()
 }
 
+func forceSelectWithFallback(page *rod.Page, sel, want, fallback string) bool {
+	if forceSelect(page, sel, want) {
+		return true
+	}
+
+	return page.MustEval(`(sel, fallback) => {
+		const s = document.querySelector(sel);
+		if (!s) return false;
+
+		const normalize = (value) => (value || '').replace(/[\s(),.\\-]/g, '').replace(/\//g, '');
+		const fallbackKey = normalize(fallback);
+		if (!fallbackKey) return false;
+
+		const opts = Array.from(s.options);
+		const found = opts.find(o => normalize(o.textContent).includes(fallbackKey));
+		if (!found) return false;
+
+		s.value = found.value;
+		s.dispatchEvent(new Event('input',  { bubbles:true }));
+		s.dispatchEvent(new Event('change', { bubbles:true }));
+		return true;
+	}`, sel, fallback).Bool()
+}
+
 func clickLessonTime(page *rod.Page, lessonType, timeRange string) bool {
 	btns := page.MustElements("a.common_btn.regist")
 	for _, btn := range btns {
@@ -656,4 +680,42 @@ func clickLessonTime(page *rod.Page, lessonType, timeRange string) bool {
 	}
 
 	return false
+}
+
+func clickLessonTimeWithFallback(page *rod.Page, lessonType, timeRange string) bool {
+	if clickLessonTime(page, lessonType, timeRange) {
+		return true
+	}
+
+	btns := page.MustElements("a.common_btn.regist")
+	for _, btn := range btns {
+		html := btn.MustProperty("outerHTML").String()
+		if containsLessonText(html, timeRange) && strings.Contains(html, "신청") {
+			btn.MustEval(`() => this.click()`)
+			return true
+		}
+	}
+
+	return false
+}
+
+func containsLessonText(haystack, needle string) bool {
+	return strings.Contains(normalizeLessonText(haystack), normalizeLessonText(needle))
+}
+
+func normalizeLessonText(text string) string {
+	replacer := strings.NewReplacer(
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+		"\u00a0", "",
+		"&nbsp;", "",
+		"~", "-",
+		"∼", "-",
+		"～", "-",
+		"–", "-",
+		"—", "-",
+	)
+	return replacer.Replace(text)
 }
