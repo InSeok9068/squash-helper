@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,9 @@ const (
 	browserOperationTimeout = 60 * time.Second
 	browserCloseTimeout     = 10 * time.Second
 	loginResultTimeout      = 20 * time.Second
+	// The SSO flow visits intermediate URLs before returning to the service home.
+	loginSuccessHost = "auc.or.kr"
+	loginSuccessPath = "/base/main/view"
 )
 
 var (
@@ -331,6 +335,17 @@ func recoverBrowserOperation(w http.ResponseWriter, session *userSession, operat
 	http.Error(w, message, http.StatusBadGateway)
 }
 
+func isLoginSuccessURL(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+
+	host := strings.TrimPrefix(strings.ToLower(parsed.Hostname()), "www.")
+	path := strings.TrimRight(parsed.Path, "/")
+	return host == loginSuccessHost && path == loginSuccessPath
+}
+
 func waitForLoginResult(page *rod.Page, initialURL string, dialogs <-chan loginDialogEvent) (string, string, error) {
 	deadline := time.NewTimer(loginResultTimeout)
 	defer deadline.Stop()
@@ -351,7 +366,7 @@ func waitForLoginResult(page *rod.Page, initialURL string, dialogs <-chan loginD
 				return currentURL, "", err
 			}
 			currentURL = info.URL
-			if currentURL != initialURL && !strings.HasPrefix(currentURL, "https://newsso.anyang.go.kr/") {
+			if currentURL != initialURL && isLoginSuccessURL(currentURL) {
 				return currentURL, "", nil
 			}
 		case <-deadline.C:
@@ -444,7 +459,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "로그인에 실패했습니다. 아이디와 비밀번호를 확인해 주세요.", http.StatusForbidden)
 		return
 	}
-	if strings.HasPrefix(url, "https://newsso.anyang.go.kr/") {
+	if !isLoginSuccessURL(url) {
 		session.pushError("로그인에 실패했습니다. 아이디와 비밀번호를 확인해 주세요.")
 		http.Error(w, "로그인 실패하였습니다. 아이디와 비밀번호를 확인해주세요.", http.StatusForbidden)
 		return
