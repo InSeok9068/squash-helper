@@ -31,16 +31,16 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		NoSandbox(true).
 		HeadlessNew(true).
 		// GPU 경로 제거
-		Append("--disable-gpu").
+		Set("disable-gpu").
 		// 소프트웨어 GL까지 차단 → CPU 낭비↓
-		Append("--disable-software-rasterizer").
+		Set("disable-software-rasterizer").
 		// 첫 실행 체크 제거
-		Append("--no-first-run").
-		Append("--no-default-browser-check").
+		Set("no-first-run").
+		Set("no-default-browser-check").
 		// 대기열 유지에 중요 (타이머/렌더러 절전 방지)
-		Append("--disable-background-timer-throttling").
-		Append("--disable-renderer-backgrounding").
-		Append("--disable-backgrounding-occluded-windows").
+		Set("disable-background-timer-throttling").
+		Set("disable-renderer-backgrounding").
+		Set("disable-backgrounding-occluded-windows").
 		// 창 사이즈 설정
 		Set("window-size", "1280,800").
 		Bin(bin)
@@ -51,9 +51,12 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "브라우저 실행에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
 		return
 	}
+	// Chromium 종료 후 Rod가 만든 임시 프로필도 함께 삭제합니다.
+	go l.Cleanup()
 
 	browser := rod.New().ControlURL(u)
 	if err := browser.Connect(); err != nil {
+		l.Kill()
 		log.Printf("browser connect failed: %v", err)
 		http.Error(w, "브라우저 연결에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
 		return
@@ -61,54 +64,106 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	page, err := stealth.Page(browser)
 	if err != nil {
-		_ = browser.Close()
+		closeBrowser(browser, l)
 		log.Printf("stealth page creation failed: %v", err)
 		http.Error(w, "브라우저 페이지 초기화에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
 		return
 	}
 
-	page.MustNavigate("https://www.auc.or.kr/hogye/main/view")
+	operationPage, cancelTimeout := timedPage(page)
+	defer cancelTimeout()
+
+	if err := operationPage.Navigate("https://www.auc.or.kr/hogye/main/view"); err != nil {
+		closeBrowser(browser, l)
+		log.Printf("첫 화면 이동 실패: %v", err)
+		http.Error(w, "외부 사이트에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.", http.StatusBadGateway)
+		return
+	}
 
 	session := &userSession{
-		browser: browser,
-		page:    page,
+		browser:  browser,
+		page:     page,
+		launcher: l,
 	}
 	sessionID, err := registerSession(session)
 	if err != nil {
-		_ = browser.Close()
+		closeBrowser(browser, l)
 		http.Error(w, "세션 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", http.StatusInternalServerError)
 		return
 	}
 
 	setSessionCookie(w, sessionID)
 
-	if f, ok := w.(http.Flusher); ok {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		f.Flush()
+	session.mu.Lock()
+	succeeded := false
+	defer func() {
+		session.mu.Unlock()
+		if !succeeded {
+			cleanupSession(sessionID)
+		}
+	}()
+
+	if err := operationPage.WaitLoad(); err != nil {
+		log.Printf("첫 화면 로딩 실패: %v", err)
+		http.Error(w, "외부 사이트 로딩 시간을 초과했습니다.", http.StatusGatewayTimeout)
+		return
 	}
 
-	session.mu.Lock()
+	if err := operationPage.Navigate("https://www.auc.or.kr/sign/in/base/user"); err != nil {
+		log.Printf("로그인 페이지 이동 실패: %v", err)
+		http.Error(w, "로그인 페이지로 이동하지 못했습니다.", http.StatusBadGateway)
+		return
+	}
 
-	defer session.mu.Unlock()
+	go handleLoginDialogs(operationPage)
 
-	page.MustWaitLoad()
+	if err := operationPage.WaitLoad(); err != nil {
+		log.Printf("로그인 페이지 로딩 실패: %v", err)
+		http.Error(w, "로그인 페이지 로딩 시간을 초과했습니다.", http.StatusGatewayTimeout)
+		return
+	}
 
-	page.MustNavigate("https://www.auc.or.kr/sign/in/base/user")
+	removeWaitPage(operationPage)
 
-	go handleLoginDialogs(page)
+	loginButton, err := operationPage.Element(".total-loginN__btn")
+	if err != nil {
+		log.Printf("로그인 방식 선택 버튼 탐색 실패: %v", err)
+		http.Error(w, "로그인 버튼을 찾지 못했습니다.", http.StatusBadGateway)
+		return
+	}
+	if err := loginButton.Click(proto.InputMouseButtonLeft, 1); err != nil {
+		log.Printf("로그인 방식 선택 버튼 클릭 실패: %v", err)
+		http.Error(w, "로그인 버튼을 누르지 못했습니다.", http.StatusBadGateway)
+		return
+	}
 
-	page.MustWaitLoad()
+	if err := operationPage.WaitLoad(); err != nil {
+		log.Printf("로그인 입력 화면 로딩 실패: %v", err)
+		http.Error(w, "로그인 입력 화면 로딩 시간을 초과했습니다.", http.StatusGatewayTimeout)
+		return
+	}
 
-	removeWaitPage(page)
+	removeWaitPage(operationPage)
 
-	page.MustElement(".total-loginN__btn").MustClick()
-
-	page.MustWaitLoad()
-
-	removeWaitPage(page)
-
+	succeeded = true
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte("로그인 페이지 진입 완료"))
+}
+
+func closeBrowser(browser *rod.Browser, browserLauncher *launcher.Launcher) {
+	if browser != nil {
+		timed := browser.Timeout(browserCloseTimeout)
+		err := timed.Close()
+		timed.CancelTimeout()
+		if err == nil {
+			return
+		}
+		log.Printf("browser close failed, forcing process termination: %v", err)
+	}
+
+	if browserLauncher != nil {
+		browserLauncher.Kill()
+	}
 }
 
 func findBrowserBinary() (string, error) {
@@ -173,8 +228,10 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "브라우저 새로고침")
 
-	page := session.page
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
 	session.pushInfo("브라우저 새로고침을 요청했습니다.")
 	page.MustReload()
 	// 페이지 진입 대기
@@ -192,8 +249,10 @@ func RemoveWaiting(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "대기열 제거")
 
-	page := session.page
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
 	session.pushInfo("사용자 요청으로 대기열을 제거합니다.")
 	removeWaitPage(page)
 

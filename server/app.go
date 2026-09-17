@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 )
 
 //go:embed web/*
@@ -23,7 +24,9 @@ var webServerFS embed.FS
 type userSession struct {
 	browser    *rod.Browser
 	page       *rod.Page
+	launcher   *launcher.Launcher
 	mu         sync.Mutex
+	activityMu sync.Mutex
 	createdAt  time.Time
 	lastActive time.Time
 
@@ -40,8 +43,10 @@ type statusEvent struct {
 }
 
 const (
-	sessionCookieName = "squash-helper-session"
-	sessionTTL        = time.Hour
+	sessionCookieName       = "squash-helper-session"
+	sessionTTL              = time.Hour
+	browserOperationTimeout = 60 * time.Second
+	browserCloseTimeout     = 10 * time.Second
 )
 
 var (
@@ -176,12 +181,12 @@ func registerSession(session *userSession) (string, error) {
 	}
 	now := time.Now()
 	if session != nil {
+		session.activityMu.Lock()
 		if session.createdAt.IsZero() {
 			session.createdAt = now
 		}
-		session.mu.Lock()
 		session.lastActive = now
-		session.mu.Unlock()
+		session.activityMu.Unlock()
 	}
 	sessionMu.Lock()
 	sessions[id] = session
@@ -203,12 +208,19 @@ func cleanupSession(sessionID string) {
 
 	session.mu.Lock()
 	if session.browser != nil {
-		if err := session.browser.Close(); err != nil {
+		browser := session.browser.Timeout(browserCloseTimeout)
+		err := browser.Close()
+		browser.CancelTimeout()
+		if err != nil {
 			log.Printf("세션 %s 브라우저 종료 실패: %v", sessionID, err)
+			if session.launcher != nil {
+				session.launcher.Kill()
+			}
 		}
 	}
 	session.browser = nil
 	session.page = nil
+	session.launcher = nil
 	session.mu.Unlock()
 
 	session.pushInfo("세션이 종료되었습니다.")
@@ -236,9 +248,9 @@ func getSessionFromRequest(r *http.Request) (string, *userSession, bool) {
 	sessionMu.Unlock()
 
 	if ok && session != nil {
-		session.mu.Lock()
+		session.activityMu.Lock()
 		session.lastActive = time.Now()
-		session.mu.Unlock()
+		session.activityMu.Unlock()
 	}
 
 	if !ok || session == nil {
@@ -262,30 +274,59 @@ func startSessionReaper() {
 	defer ticker.Stop()
 
 	for now := range ticker.C {
-		var expired []string
+		type sessionEntry struct {
+			id      string
+			session *userSession
+		}
 
+		var entries []sessionEntry
 		sessionMu.RLock()
 		for id, session := range sessions {
+			entries = append(entries, sessionEntry{id: id, session: session})
+		}
+		sessionMu.RUnlock()
+
+		var expired []string
+		for _, entry := range entries {
+			id, session := entry.id, entry.session
 			if session == nil {
 				expired = append(expired, id)
 				continue
 			}
 
-			session.mu.Lock()
+			session.activityMu.Lock()
 			lastActive := session.lastActive
-			session.mu.Unlock()
+			session.activityMu.Unlock()
 
 			if now.Sub(lastActive) > sessionTTL {
 				expired = append(expired, id)
 			}
 		}
-		sessionMu.RUnlock()
 
 		for _, id := range expired {
 			log.Printf("세션 %s이(가) 비활성 상태로 만료되어 종료합니다.", id)
 			cleanupSession(id)
 		}
 	}
+}
+
+func timedPage(page *rod.Page) (*rod.Page, func()) {
+	timed := page.Timeout(browserOperationTimeout)
+	return timed, func() {
+		timed.CancelTimeout()
+	}
+}
+
+func recoverBrowserOperation(w http.ResponseWriter, session *userSession, operation string) {
+	recovered := recover()
+	if recovered == nil {
+		return
+	}
+
+	log.Printf("%s 중 브라우저 작업 실패: %v", operation, recovered)
+	message := operation + " 처리 중 외부 사이트 응답이 지연되거나 예상과 달라졌습니다. 잠시 후 다시 시도해주세요."
+	session.pushError(message)
+	http.Error(w, message, http.StatusBadGateway)
 }
 
 func Login(w http.ResponseWriter, r *http.Request) {
@@ -320,8 +361,10 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "로그인")
 
-	page := session.page
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
 
 	// 아이디 입력
 	session.pushInfo("아이디 입력 필드를 찾습니다.")
@@ -372,8 +415,10 @@ func Move(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "강습 신청 페이지 이동")
 
-	page := session.page
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
 	session.pushInfo("강습 신청 페이지로 이동합니다.")
 	page.MustNavigate("https://www.auc.or.kr/reservation/program/lesson/list")
 	session.pushInfo("강습 신청 페이지를 불러오는 중입니다.")
@@ -393,8 +438,10 @@ func Action(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "강습 신청")
 
-	page := session.page
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
 
 	code := r.URL.Query().Get("code")
 	if code != "" {
@@ -584,13 +631,17 @@ func Screenshot(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "화면 캡처")
 
 	if session.page == nil {
 		http.Error(w, "활성화된 페이지가 없습니다.", http.StatusBadRequest)
 		return
 	}
 
-	data, err := session.page.Screenshot(true, nil)
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
+
+	data, err := page.Screenshot(true, nil)
 	if err != nil {
 		log.Printf("세션 화면 캡처 실패: %v", err)
 		session.pushError("스크린샷 캡처에 실패했습니다.")
