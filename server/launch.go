@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -207,6 +208,30 @@ func handleLoginDialogs(page *rod.Page) {
 	w2, h2 := page.HandleDialog()
 	w2()
 	_ = h2(&proto.PageHandleJavaScriptDialog{Accept: true})
+}
+
+type loginDialogEvent struct {
+	Type    proto.PageDialogType
+	Message string
+}
+
+func handleLoginResultDialogs(page *rod.Page) <-chan loginDialogEvent {
+	dialogs := make(chan loginDialogEvent, 4)
+
+	go page.EachEvent(func(event *proto.PageJavascriptDialogOpening) {
+		// Alerts report login errors; confirms (for example, duplicate-login
+		// notices) must be accepted so the SSO flow can continue.
+		_ = proto.PageHandleJavaScriptDialog{
+			Accept: true,
+		}.Call(page)
+
+		select {
+		case dialogs <- loginDialogEvent{Type: event.Type, Message: strings.TrimSpace(event.Message)}:
+		default:
+		}
+	})()
+
+	return dialogs
 }
 
 func Close(w http.ResponseWriter, r *http.Request) {

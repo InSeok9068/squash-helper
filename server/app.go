@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 //go:embed web/*
@@ -47,6 +48,7 @@ const (
 	sessionTTL              = time.Hour
 	browserOperationTimeout = 60 * time.Second
 	browserCloseTimeout     = 10 * time.Second
+	loginResultTimeout      = 20 * time.Second
 )
 
 var (
@@ -329,6 +331,35 @@ func recoverBrowserOperation(w http.ResponseWriter, session *userSession, operat
 	http.Error(w, message, http.StatusBadGateway)
 }
 
+func waitForLoginResult(page *rod.Page, initialURL string, dialogs <-chan loginDialogEvent) (string, string, error) {
+	deadline := time.NewTimer(loginResultTimeout)
+	defer deadline.Stop()
+
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	currentURL := initialURL
+	for {
+		select {
+		case dialog := <-dialogs:
+			if dialog.Type == proto.PageDialogTypeAlert || dialog.Type == proto.PageDialogTypePrompt {
+				return currentURL, dialog.Message, nil
+			}
+		case <-ticker.C:
+			info, err := page.Info()
+			if err != nil {
+				return currentURL, "", err
+			}
+			currentURL = info.URL
+			if currentURL != initialURL && !strings.HasPrefix(currentURL, "https://newsso.anyang.go.kr/") {
+				return currentURL, "", nil
+			}
+		case <-deadline.C:
+			return currentURL, "", fmt.Errorf("로그인 결과 확인 시간이 초과되었습니다.")
+		}
+	}
+}
+
 func Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST 메서드만 허용됩니다.", http.StatusMethodNotAllowed)
@@ -382,20 +413,37 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	// 로그인 버튼 클릭
 	session.pushInfo("로그인 버튼을 클릭합니다.")
+	initialURL := page.MustInfo().URL
 	buttons := page.MustElements("button")
+	clicked := false
+	var dialogs <-chan loginDialogEvent
 	for _, button := range buttons {
-		if button.MustText() == "로그인" {
+		if strings.TrimSpace(button.MustText()) == "로그인" {
+			dialogs = handleLoginResultDialogs(page)
 			button.MustClick()
+			clicked = true
 			session.pushInfo("로그인 버튼을 클릭했습니다.")
 			break
 		}
 	}
+	if !clicked {
+		session.pushError("로그인 버튼을 찾지 못했습니다.")
+		http.Error(w, "로그인 버튼을 찾지 못했습니다.", http.StatusBadGateway)
+		return
+	}
 	// 페이지 진입 대기
 	session.pushInfo("로그인 결과를 확인 중입니다.")
-	page.MustWaitLoad()
-	time.Sleep(3 * time.Second)
-
-	url := page.MustInfo().URL
+	url, dialogMessage, err := waitForLoginResult(page, initialURL, dialogs)
+	if err != nil {
+		session.pushError("로그인 결과 확인 시간이 초과되었습니다.")
+		http.Error(w, "로그인 결과 확인 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.", http.StatusGatewayTimeout)
+		return
+	}
+	if dialogMessage != "" {
+		session.pushError(dialogMessage)
+		http.Error(w, "로그인에 실패했습니다. 아이디와 비밀번호를 확인해 주세요.", http.StatusForbidden)
+		return
+	}
 	if strings.HasPrefix(url, "https://newsso.anyang.go.kr/") {
 		session.pushError("로그인에 실패했습니다. 아이디와 비밀번호를 확인해 주세요.")
 		http.Error(w, "로그인 실패하였습니다. 아이디와 비밀번호를 확인해주세요.", http.StatusForbidden)
