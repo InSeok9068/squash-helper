@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -31,16 +32,16 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		NoSandbox(true).
 		HeadlessNew(true).
 		// GPU 경로 제거
-		Append("--disable-gpu").
+		Set("disable-gpu").
 		// 소프트웨어 GL까지 차단 → CPU 낭비↓
-		Append("--disable-software-rasterizer").
+		Set("disable-software-rasterizer").
 		// 첫 실행 체크 제거
-		Append("--no-first-run").
-		Append("--no-default-browser-check").
+		Set("no-first-run").
+		Set("no-default-browser-check").
 		// 대기열 유지에 중요 (타이머/렌더러 절전 방지)
-		Append("--disable-background-timer-throttling").
-		Append("--disable-renderer-backgrounding").
-		Append("--disable-backgrounding-occluded-windows").
+		Set("disable-background-timer-throttling").
+		Set("disable-renderer-backgrounding").
+		Set("disable-backgrounding-occluded-windows").
 		// 창 사이즈 설정
 		Set("window-size", "1280,800").
 		Bin(bin)
@@ -51,7 +52,6 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "브라우저 실행에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
 		return
 	}
-
 	var browser *rod.Browser
 	var sessionID string
 	transferredToSession := false
@@ -81,7 +81,14 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page.MustNavigate("https://www.auc.or.kr/hogye/main/view")
+	operationPage, cancelTimeout := timedPage(page)
+	defer cancelTimeout()
+
+	if err := operationPage.Navigate("https://www.auc.or.kr/hogye/main/view"); err != nil {
+		log.Printf("첫 화면 이동 실패: %v", err)
+		http.Error(w, "외부 사이트에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.", http.StatusBadGateway)
+		return
+	}
 
 	session := &userSession{
 		browser:  browser,
@@ -97,40 +104,60 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	setSessionCookie(w, sessionID)
 
-	if f, ok := w.(http.Flusher); ok {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		f.Flush()
-	}
-
 	session.mu.Lock()
-
 	defer session.mu.Unlock()
 
-	page.MustWaitLoad()
+	if err := operationPage.WaitLoad(); err != nil {
+		log.Printf("첫 화면 로딩 실패: %v", err)
+		http.Error(w, "외부 사이트 로딩 시간을 초과했습니다.", http.StatusGatewayTimeout)
+		return
+	}
 
-	page.MustNavigate("https://www.auc.or.kr/sign/in/base/user")
+	if err := operationPage.Navigate("https://www.auc.or.kr/sign/in/base/user"); err != nil {
+		log.Printf("로그인 페이지 이동 실패: %v", err)
+		http.Error(w, "로그인 페이지로 이동하지 못했습니다.", http.StatusBadGateway)
+		return
+	}
 
-	go handleLoginDialogs(page)
+	go handleLoginDialogs(operationPage)
 
-	page.MustWaitLoad()
+	if err := operationPage.WaitLoad(); err != nil {
+		log.Printf("로그인 페이지 로딩 실패: %v", err)
+		http.Error(w, "로그인 페이지 로딩 시간을 초과했습니다.", http.StatusGatewayTimeout)
+		return
+	}
 
-	removeWaitPage(page)
+	removeWaitPage(operationPage)
 
-	page.MustElement(".total-loginN__btn").MustClick()
+	loginButton, err := operationPage.Element(".total-loginN__btn")
+	if err != nil {
+		log.Printf("로그인 방식 선택 버튼 탐색 실패: %v", err)
+		http.Error(w, "로그인 버튼을 찾지 못했습니다.", http.StatusBadGateway)
+		return
+	}
+	if err := loginButton.Click(proto.InputMouseButtonLeft, 1); err != nil {
+		log.Printf("로그인 방식 선택 버튼 클릭 실패: %v", err)
+		http.Error(w, "로그인 버튼을 누르지 못했습니다.", http.StatusBadGateway)
+		return
+	}
 
-	page.MustWaitLoad()
+	if err := operationPage.WaitLoad(); err != nil {
+		log.Printf("로그인 입력 화면 로딩 실패: %v", err)
+		http.Error(w, "로그인 입력 화면 로딩 시간을 초과했습니다.", http.StatusGatewayTimeout)
+		return
+	}
 
-	removeWaitPage(page)
+	removeWaitPage(operationPage)
 
 	transferredToSession = true
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Write([]byte("로그인 페이지 진입 완료"))
 }
 
 func closeBrowserResources(sessionID string, browser *rod.Browser, browserLauncher *launcher.Launcher) {
 	var closeErr error
 	if browser != nil {
-		browserWithTimeout := browser.Timeout(10 * time.Second)
+		browserWithTimeout := browser.Timeout(browserCloseTimeout)
 		closeErr = browserWithTimeout.Close()
 		browserWithTimeout.CancelTimeout()
 	}
@@ -196,6 +223,30 @@ func handleLoginDialogs(page *rod.Page) {
 	_ = h2(&proto.PageHandleJavaScriptDialog{Accept: true})
 }
 
+type loginDialogEvent struct {
+	Type    proto.PageDialogType
+	Message string
+}
+
+func handleLoginResultDialogs(page *rod.Page) <-chan loginDialogEvent {
+	dialogs := make(chan loginDialogEvent, 4)
+
+	go page.EachEvent(func(event *proto.PageJavascriptDialogOpening) {
+		// Alerts report login errors; confirms (for example, duplicate-login
+		// notices) must be accepted so the SSO flow can continue.
+		_ = proto.PageHandleJavaScriptDialog{
+			Accept: true,
+		}.Call(page)
+
+		select {
+		case dialogs <- loginDialogEvent{Type: event.Type, Message: strings.TrimSpace(event.Message)}:
+		default:
+		}
+	})()
+
+	return dialogs
+}
+
 func Close(w http.ResponseWriter, r *http.Request) {
 	if sessionID, session, ok := getSessionFromRequest(r); ok {
 		if session != nil {
@@ -215,8 +266,10 @@ func Refresh(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "브라우저 새로고침")
 
-	page := session.page
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
 	session.pushInfo("브라우저 새로고침을 요청했습니다.")
 	page.MustReload()
 	// 페이지 진입 대기
@@ -234,8 +287,10 @@ func RemoveWaiting(w http.ResponseWriter, r *http.Request) {
 
 	session.mu.Lock()
 	defer session.mu.Unlock()
+	defer recoverBrowserOperation(w, session, "대기열 제거")
 
-	page := session.page
+	page, cancelTimeout := timedPage(session.page)
+	defer cancelTimeout()
 	session.pushInfo("사용자 요청으로 대기열을 제거합니다.")
 	removeWaitPage(page)
 
