@@ -52,16 +52,30 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	browser := rod.New().ControlURL(u)
-	if err := browser.Connect(); err != nil {
+	var browser *rod.Browser
+	var sessionID string
+	transferredToSession := false
+	defer func() {
+		if transferredToSession {
+			return
+		}
+		if sessionID != "" {
+			cleanupSession(sessionID)
+			return
+		}
+		closeBrowserResources("", browser, l)
+	}()
+
+	connectedBrowser := rod.New().ControlURL(u)
+	if err := connectedBrowser.Connect(); err != nil {
 		log.Printf("browser connect failed: %v", err)
 		http.Error(w, "브라우저 연결에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
 		return
 	}
+	browser = connectedBrowser
 
 	page, err := stealth.Page(browser)
 	if err != nil {
-		_ = browser.Close()
 		log.Printf("stealth page creation failed: %v", err)
 		http.Error(w, "브라우저 페이지 초기화에 실패했습니다. 서버 로그를 확인해주세요.", http.StatusInternalServerError)
 		return
@@ -70,15 +84,16 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 	page.MustNavigate("https://www.auc.or.kr/hogye/main/view")
 
 	session := &userSession{
-		browser: browser,
-		page:    page,
+		browser:  browser,
+		launcher: l,
+		page:     page,
 	}
-	sessionID, err := registerSession(session)
+	registeredSessionID, err := registerSession(session)
 	if err != nil {
-		_ = browser.Close()
 		http.Error(w, "세션 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.", http.StatusInternalServerError)
 		return
 	}
+	sessionID = registeredSessionID
 
 	setSessionCookie(w, sessionID)
 
@@ -108,7 +123,34 @@ func Launch(w http.ResponseWriter, r *http.Request) {
 
 	removeWaitPage(page)
 
+	transferredToSession = true
 	w.Write([]byte("로그인 페이지 진입 완료"))
+}
+
+func closeBrowserResources(sessionID string, browser *rod.Browser, browserLauncher *launcher.Launcher) {
+	var closeErr error
+	if browser != nil {
+		browserWithTimeout := browser.Timeout(10 * time.Second)
+		closeErr = browserWithTimeout.Close()
+		browserWithTimeout.CancelTimeout()
+	}
+
+	if browser == nil || closeErr != nil {
+		if closeErr != nil {
+			if sessionID != "" {
+				log.Printf("세션 %s 브라우저 종료 실패: %v", sessionID, closeErr)
+			} else {
+				log.Printf("브라우저 종료 실패: %v", closeErr)
+			}
+		}
+		if browserLauncher != nil {
+			browserLauncher.Kill()
+		}
+	}
+
+	if browserLauncher != nil {
+		browserLauncher.Cleanup()
+	}
 }
 
 func findBrowserBinary() (string, error) {

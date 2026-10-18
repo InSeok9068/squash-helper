@@ -1,20 +1,26 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/launcher"
 )
 
 //go:embed web/*
@@ -22,6 +28,7 @@ var webServerFS embed.FS
 
 type userSession struct {
 	browser    *rod.Browser
+	launcher   *launcher.Launcher
 	page       *rod.Page
 	mu         sync.Mutex
 	createdAt  time.Time
@@ -152,13 +159,46 @@ func Run() {
 	mux.HandleFunc("/status/stream", StatusStream)
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 
-	go startSessionReaper()
+	reaperStop := make(chan struct{})
+	reaperDone := make(chan struct{})
+	go func() {
+		defer close(reaperDone)
+		startSessionReaper(reaperStop)
+	}()
+	defer func() {
+		close(reaperStop)
+		<-reaperDone
+	}()
 
 	// 서버 실행
 	fmt.Println("서버 실행 중... http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		panic(err)
+	httpServer := &http.Server{Addr: ":8080", Handler: mux}
+	serverDone := make(chan error, 1)
+	go func() {
+		serverDone <- httpServer.ListenAndServe()
+	}()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+
+	select {
+	case err := <-serverDone:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			cleanupAllSessions()
+			panic(err)
+		}
+	case <-signals:
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(ctx); err != nil {
+			log.Printf("HTTP 서버 graceful shutdown 실패: %v", err)
+			_ = httpServer.Close()
+		}
+		<-serverDone
 	}
+
+	cleanupAllSessions()
 }
 
 func generateSessionID() (string, error) {
@@ -202,17 +242,27 @@ func cleanupSession(sessionID string) {
 	}
 
 	session.mu.Lock()
-	if session.browser != nil {
-		if err := session.browser.Close(); err != nil {
-			log.Printf("세션 %s 브라우저 종료 실패: %v", sessionID, err)
-		}
-	}
+	closeBrowserResources(sessionID, session.browser, session.launcher)
 	session.browser = nil
+	session.launcher = nil
 	session.page = nil
 	session.mu.Unlock()
 
 	session.pushInfo("세션이 종료되었습니다.")
 	session.closeStatusChannel()
+}
+
+func cleanupAllSessions() {
+	sessionMu.RLock()
+	ids := make([]string, 0, len(sessions))
+	for id := range sessions {
+		ids = append(ids, id)
+	}
+	sessionMu.RUnlock()
+
+	for _, id := range ids {
+		cleanupSession(id)
+	}
 }
 
 func setSessionCookie(w http.ResponseWriter, sessionID string) {
@@ -257,11 +307,18 @@ func requireSession(w http.ResponseWriter, r *http.Request) (*userSession, strin
 	return session, sessionID, true
 }
 
-func startSessionReaper() {
+func startSessionReaper(stop <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	for now := range ticker.C {
+	for {
+		var now time.Time
+		select {
+		case now = <-ticker.C:
+		case <-stop:
+			return
+		}
+
 		var expired []string
 
 		sessionMu.RLock()
